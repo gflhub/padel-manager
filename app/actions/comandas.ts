@@ -134,3 +134,26 @@ export async function closeComanda(id: string, paymentMethod: string) {
     revalidatePath('/admin/comandas')
     return { error: null }
 }
+
+export async function closeMultipleComandas(ids: string[], paymentMethod: string) {
+    const { ctx, error: permError } = await assertStaffContext()
+    if (permError || !ctx) return { error: permError ?? 'Erro' }
+
+    if (!ids || ids.length === 0) return { error: 'Nenhuma comanda selecionada' }
+
+    const service = createServiceClient()
+    const { error } = await service
+        .from('comandas')
+        .update({
+            status: 'closed',
+            closed_at: new Date().toISOString(),
+            closed_by: ctx.userId,
+            notes: paymentMethod ? `Pagamento: ${paymentMethod}` : undefined,
+        })
+        .in('id', ids)
+        .eq('club_id', ctx.clubId)
+
+    if (error) return { error: error.message }
+    revalidatePath('/admin/comandas')
+    return { error: null }
+}
