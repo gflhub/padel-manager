@@ -2,18 +2,19 @@ import { NextRequest, NextResponse } from 'next/server'
 import { createServiceClient } from '@/lib/supabase/server'
 import { createClient } from '@/lib/supabase/server'
 
-const LINEAR_API_URL = 'https://api.linear.app/graphql'
+const GITHUB_API_URL = 'https://api.github.com'
+const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
 
-// Mapeamento de categoria → prioridade do Linear (1=urgent, 2=high, 3=medium, 4=low)
-const PRIORITY_MAP: Record<string, number> = {
-  bug: 1,
-  suggestion: 3,
-  question: 3,
-  other: 4,
+// Mapeamento de categoria → labels do GitHub
+const LABEL_MAP: Record<string, string[]> = {
+  bug: ['bug'],
+  suggestion: ['enhancement'],
+  question: ['question'],
+  other: ['feedback'],
 }
 
 // Mapeamento de categoria → prefixo do título
-const LABEL_MAP: Record<string, string> = {
+const TITLE_PREFIX_MAP: Record<string, string> = {
   bug: '🐛 [Bug]',
   suggestion: '💡 [Sugestão]',
   question: '❓ [Dúvida]',
@@ -32,7 +33,7 @@ const FEATURE_MAP: Record<string, string> = {
   other: 'Geral',
 }
 
-function buildLinearDescription(data: {
+function buildIssueBody(data: {
   userName?: string | null
   userEmail?: string | null
   currentPage?: string | null
@@ -47,26 +48,22 @@ function buildLinearDescription(data: {
 }): string {
   const lines: string[] = []
 
-  // Cabeçalho
   lines.push('## 👤 Informações do Usuário')
   lines.push(`- **Nome:** ${data.userName || '_não informado_'}`)
   lines.push(`- **Email:** ${data.userEmail || '_não informado_'}`)
   lines.push('')
 
-  // Contexto
   lines.push('## 📍 Contexto')
   lines.push(`- **Página:** \`${data.currentPage || 'desconhecida'}\``)
   lines.push(`- **Funcionalidade:** ${data.serviceFeature ? (FEATURE_MAP[data.serviceFeature] ?? data.serviceFeature) : '_não informada_'}`)
   lines.push('')
 
-  // Descrição
   if (data.description) {
     lines.push('## 📝 Descrição')
     lines.push(data.description)
     lines.push('')
   }
 
-  // Log de sessão
   const log = data.sessionLog
   if (log) {
     lines.push('## 🔍 Log de Sessão')
@@ -81,7 +78,8 @@ function buildLinearDescription(data: {
       lines.push('|---|---|---|')
       events.forEach((evt) => {
         const time = new Date(evt.timestamp).toLocaleTimeString('pt-BR')
-        const type = evt.type === 'navigation' ? '🧭 Navegação'
+        const type =
+          evt.type === 'navigation' ? '🧭 Navegação'
           : evt.type === 'error' ? '🔴 Erro'
           : evt.type === 'action' ? '⚡ Ação'
           : evt.type
@@ -91,7 +89,6 @@ function buildLinearDescription(data: {
       lines.push('')
     }
 
-    // Info do browser
     const bi = log.browserInfo
     if (bi) {
       lines.push('## 🖥️ Ambiente')
@@ -100,63 +97,118 @@ function buildLinearDescription(data: {
       lines.push(`- **Plataforma:** ${bi.platform || '—'}`)
       lines.push(`- **Idioma:** ${bi.language || '—'}`)
       lines.push(`- **Online:** ${bi.online ? 'Sim' : 'Não'}`)
+      lines.push('')
     }
   }
 
-  lines.push('')
   lines.push('---')
   lines.push(`*Enviado via Padel Manager App — ${new Date().toLocaleString('pt-BR')}*`)
 
   return lines.join('\n')
 }
 
-async function createLinearIssue(payload: {
+/**
+ * Cria uma issue no repositório do GitHub e retorna { id, nodeId, url }.
+ */
+async function createGitHubIssue(payload: {
+  token: string
+  org: string
+  repo: string
   title: string
-  description: string
-  priority: number
-  teamId: string
-  apiKey: string
-  projectId?: string | null
-}): Promise<{ id: string; url: string } | null> {
+  body: string
+  labels: string[]
+}): Promise<{ id: number; nodeId: string; url: string } | null> {
+  const res = await fetch(`${GITHUB_API_URL}/repos/${payload.org}/${payload.repo}/issues`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${payload.token}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      title: payload.title,
+      body: payload.body,
+      labels: payload.labels,
+    }),
+  })
+
+  if (!res.ok) {
+    const err = await res.text()
+    console.error('[feedback] GitHub Issues API error:', res.status, err)
+    return null
+  }
+
+  const json = await res.json()
+  return { id: json.number, nodeId: json.node_id, url: json.html_url }
+}
+
+/**
+ * Obtém o node_id de um GitHub Project v2 a partir do número do projeto
+ * na organização. Necessário para adicionar items ao projeto.
+ */
+async function getProjectNodeId(payload: {
+  token: string
+  org: string
+  projectNumber: number
+}): Promise<string | null> {
   const query = `
-    mutation CreateIssue($input: IssueCreateInput!) {
-      issueCreate(input: $input) {
-        success
-        issue {
+    query GetProject($org: String!, $number: Int!) {
+      organization(login: $org) {
+        projectV2(number: $number) {
           id
-          url
-          identifier
         }
       }
     }
   `
-
-  const variables = {
-    input: {
-      teamId: payload.teamId,
-      title: payload.title,
-      description: payload.description,
-      priority: payload.priority,
-      ...(payload.projectId ? { projectId: payload.projectId } : {}),
-    },
-  }
-
-  const res = await fetch(LINEAR_API_URL, {
+  const res = await fetch(GITHUB_GRAPHQL_URL, {
     method: 'POST',
     headers: {
+      Authorization: `Bearer ${payload.token}`,
       'Content-Type': 'application/json',
-      Authorization: payload.apiKey,
     },
-    body: JSON.stringify({ query, variables }),
+    body: JSON.stringify({ query, variables: { org: payload.org, number: payload.projectNumber } }),
   })
 
   if (!res.ok) return null
+  const json = await res.json()
+  return json?.data?.organization?.projectV2?.id ?? null
+}
+
+/**
+ * Adiciona uma issue (pelo node_id) a um GitHub Project v2.
+ */
+async function addIssueToProject(payload: {
+  token: string
+  projectNodeId: string
+  issueNodeId: string
+}): Promise<boolean> {
+  const mutation = `
+    mutation AddItem($projectId: ID!, $contentId: ID!) {
+      addProjectV2ItemById(input: { projectId: $projectId, contentId: $contentId }) {
+        item { id }
+      }
+    }
+  `
+  const res = await fetch(GITHUB_GRAPHQL_URL, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${payload.token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      query: mutation,
+      variables: { projectId: payload.projectNodeId, contentId: payload.issueNodeId },
+    }),
+  })
+
+  if (!res.ok) {
+    console.error('[feedback] addProjectV2ItemById failed:', res.status)
+    return false
+  }
 
   const json = await res.json()
-  const issue = json?.data?.issueCreate?.issue
-  if (!issue) return null
-
-  return { id: issue.id, url: issue.url }
+  return !!json?.data?.addProjectV2ItemById?.item?.id
 }
 
 export async function POST(request: NextRequest) {
@@ -189,15 +241,15 @@ export async function POST(request: NextRequest) {
     } catch {/* continua sem autenticação */}
 
     // Título final da issue
-    const prefix = category ? (LABEL_MAP[category] ?? '📝 [Feedback]') : '📝 [Feedback]'
+    const prefix = category ? (TITLE_PREFIX_MAP[category] ?? '📝 [Feedback]') : '📝 [Feedback]'
     const issueTitle = title
       ? `${prefix} ${title}`
       : service_feature
         ? `${prefix} Problema em ${FEATURE_MAP[service_feature] ?? service_feature}`
         : `${prefix} Feedback do usuário — ${current_page ?? 'página desconhecida'}`
 
-    // Descrição markdown
-    const markdownDescription = buildLinearDescription({
+    // Corpo da issue em Markdown
+    const issueBody = buildIssueBody({
       userName: resolvedName,
       userEmail: resolvedEmail,
       currentPage: current_page,
@@ -230,44 +282,68 @@ export async function POST(request: NextRequest) {
       console.error('[feedback] DB error:', dbError)
     }
 
-    // Cria issue no Linear
-    const apiKey = process.env.LINEAR_API_KEY
-    const teamId = process.env.LINEAR_TEAM_ID
-    const projectId = process.env.LINEAR_PROJECT_ID ?? null
-    let linearIssueId: string | null = null
-    let linearIssueUrl: string | null = null
+    // Configurações do GitHub
+    const ghToken = process.env.GITHUB_TOKEN
+    const ghOrg = process.env.GITHUB_ORG
+    const ghRepo = process.env.GITHUB_REPO
+    const ghProjectNumber = process.env.GITHUB_PROJECT_NUMBER
+      ? parseInt(process.env.GITHUB_PROJECT_NUMBER, 10)
+      : null
 
-    if (apiKey && teamId) {
-      const issue = await createLinearIssue({
+    let githubIssueId: string | null = null
+    let githubIssueUrl: string | null = null
+
+    if (ghToken && ghOrg && ghRepo) {
+      const labels = LABEL_MAP[category ?? 'other'] ?? ['feedback']
+
+      const issue = await createGitHubIssue({
+        token: ghToken,
+        org: ghOrg,
+        repo: ghRepo,
         title: issueTitle,
-        description: markdownDescription,
-        priority: PRIORITY_MAP[category ?? 'other'] ?? 3,
-        teamId,
-        apiKey,
-        projectId,
+        body: issueBody,
+        labels,
       })
 
       if (issue) {
-        linearIssueId = issue.id
-        linearIssueUrl = issue.url
+        githubIssueId = String(issue.id)
+        githubIssueUrl = issue.url
 
-        // Atualiza o registro com o ID do Linear
+        // Adiciona ao GitHub Project v2 se o número de projeto estiver configurado
+        if (ghProjectNumber) {
+          const projectNodeId = await getProjectNodeId({
+            token: ghToken,
+            org: ghOrg,
+            projectNumber: ghProjectNumber,
+          })
+
+          if (projectNodeId) {
+            await addIssueToProject({
+              token: ghToken,
+              projectNodeId,
+              issueNodeId: issue.nodeId,
+            })
+          } else {
+            console.warn('[feedback] Projeto GitHub não encontrado para o número:', ghProjectNumber)
+          }
+        }
+
+        // Atualiza o registro no Supabase com os dados da issue
         if (savedReport?.id) {
           await service
             .from('feedback_reports')
-            .update({ linear_issue_id: linearIssueId, linear_issue_url: linearIssueUrl })
+            .update({ issue_tracker_id: githubIssueId, issue_tracker_url: githubIssueUrl })
             .eq('id', savedReport.id)
         }
       }
     } else {
-      console.warn('[feedback] LINEAR_API_KEY ou LINEAR_TEAM_ID não configurados.')
-      if (!projectId) console.warn('[feedback] LINEAR_PROJECT_ID não configurado — issue será criada sem projeto.')
+      console.warn('[feedback] GITHUB_TOKEN, GITHUB_ORG ou GITHUB_REPO não configurados.')
     }
 
     return NextResponse.json({
       success: true,
       reportId: savedReport?.id ?? null,
-      linearIssueUrl,
+      linearIssueUrl: githubIssueUrl, // mantém o campo para o frontend não precisar mudar
     })
   } catch (err) {
     console.error('[feedback] Unexpected error:', err)

@@ -6,7 +6,7 @@ import { z } from 'zod'
 
 const memberSchema = z.object({
     name: z.string().min(2, 'Nome deve ter pelo menos 2 caracteres'),
-    email: z.string().email('Email inválido').optional().or(z.literal('')),
+    email: z.string().email('Email obrigatório e deve ser válido'),
     phone: z.string().optional().nullable(),
     cpf: z.string().optional().nullable(),
     notes: z.string().optional().nullable(),
@@ -26,8 +26,6 @@ async function assertStaffContext() {
         .select('club_id, role')
         .eq('profile_id', user.id)
         .eq('active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
         .single()
 
     if (!staff) return { context: null, error: 'Sem permissão: usuário não é staff de nenhum clube' }
@@ -35,7 +33,41 @@ async function assertStaffContext() {
 }
 
 // ─────────────────────────────────────────────────────────────
+// Verificar status de um CPF na plataforma
+// Busca em profiles (global). Retorna profile encontrado e se
+// já é membro do clube atual.
+// ─────────────────────────────────────────────────────────────
+export async function checkCpfStatus(cpfRaw: string) {
+    const { context, error } = await assertStaffContext()
+    if (error || !context) return { error: error ?? 'Erro desconhecido', data: null, isMember: false }
+
+    const cpf = cpfRaw.replace(/\D/g, '')
+    if (!cpf || cpf.length !== 11) return { error: 'CPF inválido', data: null, isMember: false }
+
+    const service = createServiceClient()
+    const { data: profile } = await service
+        .from('profiles')
+        .select('id, name, email, status')
+        .eq('cpf', cpf)
+        .maybeSingle()
+
+    if (!profile) return { data: null, error: null, isMember: false }
+
+    // Verificar se esse profile já é membro do clube atual
+    const { data: memberCheck } = await service
+        .from('club_members')
+        .select('id')
+        .eq('club_id', context.clubId)
+        .eq('profile_id', profile.id)
+        .maybeSingle()
+
+    return { data: profile, error: null, isMember: !!memberCheck }
+}
+
+// ─────────────────────────────────────────────────────────────
 // Listar membros do clube
+// Dados de identidade exclusivamente via JOIN com profiles.
+// club_members armazena apenas: profile_id, notes, active, joined_at
 // ─────────────────────────────────────────────────────────────
 export async function getCustomers() {
     const { context, error } = await assertStaffContext()
@@ -47,20 +79,16 @@ export async function getCustomers() {
         .select(`
             id,
             profile_id,
-            name,
-            email,
-            phone,
-            cpf,
             notes,
             active,
             joined_at,
-            profile:profiles(id, name, email, phone, cpf, avatar_url)
+            profile:profiles(id, name, email, phone, cpf, avatar_url, status)
         `)
         .eq('club_id', context.clubId)
-        .order('name', { ascending: true })
+        .order('joined_at', { ascending: false })
 
     if (dbError) return { error: dbError.message, data: null }
-    // Supabase retorna joins como array; normaliza profile para objeto único
+    // Normaliza profile (Supabase retorna joins como array)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const normalized = (data || []).map((m: any) => ({
         ...m,
@@ -70,12 +98,12 @@ export async function getCustomers() {
 }
 
 // ─────────────────────────────────────────────────────────────
-// Criar membro (vínculo clube ↔ cliente)
+// Criar membro — vínculo puro (clube ↔ profile)
 // Fluxo:
-//   1. CPF informado → busca profile existente (usuário do sistema)
-//   2. Email informado → busca profile existente
-//   3. Se encontrou profile → cria vínculo apontando para ele
-//   4. Se não encontrou → cria membro manual (sem profile_id)
+//   A. CPF encontrado em profiles → cria vínculo; se pre_registered,
+//      atualiza name/email/phone (nunca cpf)
+//   B. CPF não encontrado → pré-cadastra via Supabase Admin Auth,
+//      insere profile, cria vínculo
 // ─────────────────────────────────────────────────────────────
 export async function createCustomer(formData: FormData) {
     const { context, error: permError } = await assertStaffContext()
@@ -83,7 +111,7 @@ export async function createCustomer(formData: FormData) {
 
     const raw = {
         name: (formData.get('name') as string)?.trim(),
-        email: (formData.get('email') as string)?.toLowerCase().trim() || undefined,
+        email: (formData.get('email') as string)?.toLowerCase().trim(),
         phone: (formData.get('phone') as string) || null,
         cpf: (formData.get('cpf') as string)?.replace(/\D/g, '') || null,
         notes: (formData.get('notes') as string) || null,
@@ -94,78 +122,131 @@ export async function createCustomer(formData: FormData) {
 
     const service = createServiceClient()
 
-    // 1. Verificar membro duplicado no mesmo clube por CPF
+    // Verificar se já é membro do clube por CPF
     if (parsed.data.cpf) {
-        const { data: dupCpf } = await service
-            .from('club_members')
-            .select('id, name')
-            .eq('club_id', context.clubId)
+        const { data: existingProfile } = await service
+            .from('profiles')
+            .select('id, name, email, status')
             .eq('cpf', parsed.data.cpf)
             .maybeSingle()
 
-        if (dupCpf) {
-            return { error: `CPF já vinculado a "${dupCpf.name}" neste clube.`, existingId: dupCpf.id }
-        }
-    }
-
-    // 2. Verificar membro duplicado no mesmo clube por email
-    if (parsed.data.email) {
-        const { data: dupEmail } = await service
-            .from('club_members')
-            .select('id, name')
-            .eq('club_id', context.clubId)
-            .eq('email', parsed.data.email)
-            .maybeSingle()
-
-        if (dupEmail) {
-            return { error: `Email já vinculado a "${dupEmail.name}" neste clube.`, existingId: dupEmail.id }
-        }
-    }
-
-    // 3. Descobrir se existe um profile no sistema com esse CPF ou email
-    let linkedProfileId: string | null = null
-
-    if (parsed.data.cpf) {
-        const { data: profileByCpf } = await service
-            .from('profiles')
-            .select('id')
-            .eq('cpf', parsed.data.cpf)
-            .maybeSingle()
-        if (profileByCpf) linkedProfileId = profileByCpf.id
-    }
-
-    if (!linkedProfileId && parsed.data.email) {
-        const { data: profileByEmail } = await service
-            .from('profiles')
-            .select('id')
-            .eq('email', parsed.data.email)
-            .maybeSingle()
-        if (profileByEmail) {
-            // Verificar se esse profile já não está vinculado a este clube
+        if (existingProfile) {
+            // Verificar se já é membro deste clube
             const { data: alreadyMember } = await service
                 .from('club_members')
-                .select('id, name')
+                .select('id')
                 .eq('club_id', context.clubId)
-                .eq('profile_id', profileByEmail.id)
+                .eq('profile_id', existingProfile.id)
                 .maybeSingle()
 
             if (alreadyMember) {
-                return { error: `Este usuário (${parsed.data.email}) já é membro deste clube como "${alreadyMember.name}".`, existingId: alreadyMember.id }
+                return { error: 'Este cliente já é membro deste clube.', existingId: alreadyMember.id }
             }
-            linkedProfileId = profileByEmail.id
+
+            // Cenário A: profile encontrado — cria vínculo puro
+            // Se pre_registered, atualiza dados de contato (nunca cpf)
+            if (existingProfile.status === 'pre_registered') {
+                await service.from('profiles').update({
+                    name: parsed.data.name,
+                    email: parsed.data.email,
+                    phone: parsed.data.phone,
+                    // cpf: NUNCA atualizado — identificador permanente
+                }).eq('id', existingProfile.id)
+            }
+
+            const { data, error } = await service
+                .from('club_members')
+                .insert({
+                    club_id: context.clubId,
+                    profile_id: existingProfile.id,
+                    notes: parsed.data.notes,
+                    active: true,
+                })
+                .select()
+                .single()
+
+            if (error) return { error: error.message }
+            revalidatePath('/admin/customers')
+            return {
+                data,
+                error: null,
+                linked: true,
+                message: existingProfile.status === 'pre_registered'
+                    ? 'Pré-cadastro vinculado ao clube com dados atualizados.'
+                    : 'Cliente vinculado com sucesso! Já possui conta ativa na plataforma.',
+            }
         }
     }
 
-    // 4. Inserir vínculo
+    // Cenário B: CPF não existe — verificar duplicidade por email também
+    const { data: profileByEmail } = await service
+        .from('profiles')
+        .select('id, status')
+        .eq('email', parsed.data.email)
+        .maybeSingle()
+
+    if (profileByEmail) {
+        const { data: alreadyMember } = await service
+            .from('club_members')
+            .select('id')
+            .eq('club_id', context.clubId)
+            .eq('profile_id', profileByEmail.id)
+            .maybeSingle()
+
+        if (alreadyMember) {
+            return { error: 'Já existe um cliente com este email neste clube.', existingId: alreadyMember.id }
+        }
+
+        // Mesmo fluxo do Cenário A
+        const { data, error } = await service
+            .from('club_members')
+            .insert({
+                club_id: context.clubId,
+                profile_id: profileByEmail.id,
+                notes: parsed.data.notes,
+                active: true,
+            })
+            .select()
+            .single()
+
+        if (error) return { error: error.message }
+        revalidatePath('/admin/customers')
+        return { data, error: null, linked: true, message: 'Cliente vinculado com sucesso!' }
+    }
+
+    // Cenário B puro: nenhum profile existe — pré-cadastrar
+    const randomPassword = crypto.randomUUID() + crypto.randomUUID()
+
+    const { data: authData, error: authErr } = await service.auth.admin.createUser({
+        email: parsed.data.email,
+        password: randomPassword,
+        email_confirm: true,
+        user_metadata: {
+            name: parsed.data.name,
+            cpf: parsed.data.cpf ?? undefined,
+            phone: parsed.data.phone ?? undefined,
+        },
+    })
+
+    if (authErr) return { error: `Erro ao pré-cadastrar cliente: ${authErr.message}` }
+    if (!authData.user) return { error: 'Erro ao criar usuário: resposta vazia' }
+
+    // Upsert do profile com status pre_registered
+    await service.from('profiles').upsert({
+        id: authData.user.id,
+        email: parsed.data.email,
+        name: parsed.data.name,
+        cpf: parsed.data.cpf,
+        phone: parsed.data.phone,
+        status: 'pre_registered',
+    })
+
+    // Vínculo puro — sem dados de identidade em club_members
     const { data, error } = await service
         .from('club_members')
         .insert({
             club_id: context.clubId,
-            profile_id: linkedProfileId, // null se for manual
-            name: parsed.data.name,
-            email: parsed.data.email || null,
-            phone: parsed.data.phone,
-            cpf: parsed.data.cpf,
+            profile_id: authData.user.id,
             notes: parsed.data.notes,
             active: true,
         })
@@ -174,20 +255,20 @@ export async function createCustomer(formData: FormData) {
 
     if (error) return { error: error.message }
 
-    const isLinked = !!linkedProfileId
     revalidatePath('/admin/customers')
     return {
         data,
         error: null,
-        linked: isLinked,
-        message: isLinked
-            ? 'Cliente vinculado com sucesso! Usuário já possui conta no sistema.'
-            : 'Cliente cadastrado manualmente.',
+        linked: false,
+        message: 'Pré-cadastro criado! O cliente poderá ativar a conta pelo app.',
     }
 }
 
 // ─────────────────────────────────────────────────────────────
-// Atualizar dados do vínculo (apenas dados do clube, não do profile)
+// Atualizar dados do vínculo
+// - notes: sempre editável (campo exclusivo do clube)
+// - name/email/phone: editável em profiles somente se pre_registered
+// - cpf: NUNCA editável via staff
 // ─────────────────────────────────────────────────────────────
 export async function updateCustomer(id: string, formData: FormData) {
     const { context, error: permError } = await assertStaffContext()
@@ -195,66 +276,46 @@ export async function updateCustomer(id: string, formData: FormData) {
 
     const service = createServiceClient()
 
-    // Verificar que o membro pertence ao clube do usuário
+    // Buscar o vínculo com o profile correspondente
     const { data: member } = await service
         .from('club_members')
-        .select('id, club_id, profile_id, cpf, email')
+        .select('id, club_id, profile_id, profile:profiles(id, status)')
         .eq('id', id)
         .single()
 
     if (!member) return { error: 'Membro não encontrado' }
     if (member.club_id !== context.clubId) return { error: 'Sem permissão sobre este membro' }
 
-    const raw = {
-        name: (formData.get('name') as string)?.trim(),
-        phone: (formData.get('phone') as string) || null,
-        notes: (formData.get('notes') as string) || null,
-        // CPF e email só editáveis se cadastro manual (sem profile_id)
-        cpf: !member.profile_id
-            ? (formData.get('cpf') as string)?.replace(/\D/g, '') || null
-            : member.cpf,
-        email: !member.profile_id
-            ? (formData.get('email') as string)?.toLowerCase().trim() || null
-            : member.email,
-    }
+    const notes = (formData.get('notes') as string) || null
 
-    // Verificar CPF duplicado no clube (excluindo o próprio)
-    if (raw.cpf && raw.cpf !== member.cpf) {
-        const { data: dupCpf } = await service
-            .from('club_members')
-            .select('id, name')
-            .eq('club_id', context.clubId)
-            .eq('cpf', raw.cpf)
-            .neq('id', id)
-            .maybeSingle()
-        if (dupCpf) return { error: `CPF já vinculado a "${dupCpf.name}" neste clube.` }
-    }
-
-    // Verificar email duplicado no clube (excluindo o próprio)
-    if (raw.email && raw.email !== member.email) {
-        const { data: dupEmail } = await service
-            .from('club_members')
-            .select('id, name')
-            .eq('club_id', context.clubId)
-            .eq('email', raw.email)
-            .neq('id', id)
-            .maybeSingle()
-        if (dupEmail) return { error: `Email já vinculado a "${dupEmail.name}" neste clube.` }
-    }
-
+    // Atualizar notes no vínculo do clube
     const { data, error } = await service
         .from('club_members')
-        .update({
-            name: raw.name,
-            phone: raw.phone,
-            notes: raw.notes,
-            ...(member.profile_id ? {} : { cpf: raw.cpf, email: raw.email }),
-        })
+        .update({ notes })
         .eq('id', id)
+        .eq('club_id', context.clubId)
         .select()
         .single()
 
     if (error) return { error: error.message }
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const profile = Array.isArray((member as any).profile) ? (member as any).profile[0] : (member as any).profile
+
+    // Atualizar name/email/phone no profile apenas se pre_registered
+    // cpf nunca é incluído neste UPDATE
+    if (profile?.status === 'pre_registered' && member.profile_id) {
+        const name = (formData.get('name') as string)?.trim() || null
+        const email = (formData.get('email') as string)?.toLowerCase().trim() || null
+        const phone = (formData.get('phone') as string) || null
+
+        if (name || email || phone) {
+            await service.from('profiles')
+                .update({ name, email, phone })
+                .eq('id', member.profile_id)
+        }
+    }
+
     revalidatePath('/admin/customers')
     return { data, error: null }
 }

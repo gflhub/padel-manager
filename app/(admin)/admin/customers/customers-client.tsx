@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef } from 'react'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,31 +8,35 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Textarea } from "@/components/ui/textarea"
-import { createCustomer, updateCustomer, toggleCustomerActive } from "@/app/actions/customers"
+import { createCustomer, updateCustomer, toggleCustomerActive, checkCpfStatus } from "@/app/actions/customers"
 import { toast } from "sonner"
-import { Plus, Pencil, UserCheck, UserX, Search, Link as LinkIcon } from "lucide-react"
+import { Plus, Pencil, UserCheck, UserX, Search, Link as LinkIcon, Loader2, AlertCircle, Lock } from "lucide-react"
+
+// ─── Tipos ───────────────────────────────────────────────────
+// Dados de identidade vêm exclusivamente do profile (Single Source of Truth)
+// club_members armazena apenas: profile_id, notes, active, joined_at
+interface CustomerProfile {
+    id: string
+    name: string | null
+    email: string
+    phone: string | null
+    cpf: string | null
+    avatar_url: string | null
+    status: string | null
+}
 
 interface Customer {
     id: string
-    profile_id: string | null  // null = cadastro manual pelo clube
-    name: string
-    email: string | null
-    phone: string | null
-    cpf: string | null
+    profile_id: string
     notes: string | null
     active: boolean
     joined_at: string
-    profile?: {
-        id: string
-        name: string
-        email: string
-        phone: string | null
-        cpf: string | null
-        avatar_url: string | null
-    } | null
+    profile: CustomerProfile | null
 }
 
+// ─── Helpers de formatação ────────────────────────────────────
 function formatCpf(value: string) {
     return value
         .replace(/\D/g, '')
@@ -50,6 +54,21 @@ function formatPhone(value: string) {
         .slice(0, 15)
 }
 
+function isValidCpf(cpf: string) {
+    return cpf.replace(/\D/g, '').length === 11
+}
+
+// ─── Tipos auxiliares ─────────────────────────────────────────
+type CpfCheckState = 'idle' | 'checking' | 'not-found' | 'found' | 'member'
+
+interface FoundProfile {
+    id: string
+    name: string | null
+    email: string
+    status: string | null
+}
+
+// ─── Componente principal ─────────────────────────────────────
 export default function CustomersClient({ customers: initialCustomers }: { customers: Customer[] }) {
     const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
     const [openCreate, setOpenCreate] = useState(false)
@@ -57,42 +76,127 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
     const [loading, setLoading] = useState(false)
     const [search, setSearch] = useState('')
 
+    // ── Estado do formulário de criação ──
     const [cpfInput, setCpfInput] = useState('')
+    const [nameInput, setNameInput] = useState('')
+    const [emailInput, setEmailInput] = useState('')
     const [phoneInput, setPhoneInput] = useState('')
-    const [editCpf, setEditCpf] = useState('')
+    const [cpfCheckState, setCpfCheckState] = useState<CpfCheckState>('idle')
+    const [foundProfile, setFoundProfile] = useState<FoundProfile | null>(null)
+
+    // ── Popup de confirmação de vínculo ──
+    const [showConfirmLink, setShowConfirmLink] = useState(false)
+    const pendingSubmitRef = useRef<FormData | null>(null)
+
+    // ── Estado do formulário de edição ──
     const [editPhone, setEditPhone] = useState('')
 
+    // ── Filtro: pesquisa nos dados do profile ──
     const filtered = useMemo(() => {
         if (!search.trim()) return customers
         const q = search.toLowerCase()
-        return customers.filter(c =>
-            c.name?.toLowerCase().includes(q) ||
-            c.email?.toLowerCase().includes(q) ||
-            c.cpf?.includes(q) ||
-            c.phone?.includes(q)
-        )
+        return customers.filter(c => {
+            const p = c.profile
+            return (
+                p?.name?.toLowerCase().includes(q) ||
+                p?.email?.toLowerCase().includes(q) ||
+                p?.cpf?.includes(q) ||
+                p?.phone?.includes(q)
+            )
+        })
     }, [customers, search])
 
+    // ── Fecha o dialog de criação e limpa tudo ──
+    const resetCreateForm = () => {
+        setCpfInput('')
+        setNameInput('')
+        setEmailInput('')
+        setPhoneInput('')
+        setCpfCheckState('idle')
+        setFoundProfile(null)
+        pendingSubmitRef.current = null
+    }
+
+    // ── Verifica CPF no onBlur ──
+    const handleCpfBlur = async () => {
+        if (!cpfInput || !isValidCpf(cpfInput)) {
+            if (cpfInput && !isValidCpf(cpfInput)) {
+                toast.error('CPF deve ter 11 dígitos.')
+            }
+            return
+        }
+
+        setCpfCheckState('checking')
+        const result = await checkCpfStatus(cpfInput)
+
+        if (result.error) {
+            toast.error(result.error)
+            setCpfCheckState('idle')
+            return
+        }
+
+        if (result.isMember) {
+            setCpfCheckState('member')
+            return
+        }
+
+        if (result.data) {
+            setCpfCheckState('found')
+            setFoundProfile(result.data as FoundProfile)
+            setNameInput(result.data.name ?? '')
+            setEmailInput(result.data.email ?? '')
+        } else {
+            setCpfCheckState('not-found')
+            setFoundProfile(null)
+        }
+    }
+
+    // ── Submit do formulário de criação ──
     const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
-        setLoading(true)
+        if (cpfCheckState === 'checking' || cpfCheckState === 'member') return
+
         const formData = new FormData(e.currentTarget)
+
+        if (cpfCheckState === 'found' && foundProfile) {
+            pendingSubmitRef.current = formData
+            setShowConfirmLink(true)
+            return
+        }
+
+        await submitCreateCustomer(formData)
+    }
+
+    const submitCreateCustomer = async (formData: FormData) => {
+        setLoading(true)
         const result = await createCustomer(formData)
         if (result.error) {
             toast.error(result.error)
         } else {
-            const msg = 'linked' in result && result.linked
-                ? '✓ Usuário do sistema vinculado como cliente!'
-                : 'Cliente cadastrado com sucesso!'
-            toast.success(msg)
+            const linked = 'linked' in result && result.linked
+            toast.success(linked
+                ? '✓ Usuário da plataforma vinculado ao clube!'
+                : '✓ Pré-cadastro criado! Cliente pode ativar a conta pelo app.')
             setOpenCreate(false)
-            setCpfInput('')
-            setPhoneInput('')
-            if (result.data) setCustomers(prev => [...prev, result.data as Customer].sort((a, b) => a.name.localeCompare(b.name)))
+            resetCreateForm()
+            if (result.data) {
+                // Refetch implícito via revalidatePath no server — recarrega a página
+                // para obter o cliente com o profile populado via JOIN
+                window.location.reload()
+            }
         }
         setLoading(false)
     }
 
+    const handleConfirmLink = async () => {
+        setShowConfirmLink(false)
+        if (pendingSubmitRef.current) {
+            await submitCreateCustomer(pendingSubmitRef.current)
+            pendingSubmitRef.current = null
+        }
+    }
+
+    // ── Submit do formulário de edição ──
     const handleUpdate = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         if (!editingCustomer) return
@@ -103,10 +207,8 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
             toast.error(result.error)
         } else {
             toast.success('Cliente atualizado com sucesso!')
-            if (result.data) {
-                setCustomers(prev => prev.map(c => c.id === editingCustomer.id ? result.data as Customer : c))
-            }
             setEditingCustomer(null)
+            window.location.reload()
         }
         setLoading(false)
     }
@@ -121,44 +223,150 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
         }
     }
 
+    const fieldsLocked = cpfCheckState === 'idle' || cpfCheckState === 'checking' || cpfCheckState === 'member'
+    const isPreRegistered = (c: Customer) => c.profile?.status === 'pre_registered'
+
     return (
         <div className="space-y-6">
+
+            {/* ── Popup de Confirmação de Vínculo ── */}
+            <AlertDialog open={showConfirmLink} onOpenChange={setShowConfirmLink}>
+                <AlertDialogContent>
+                    <AlertDialogHeader>
+                        <AlertDialogTitle>Vincular cliente ao clube?</AlertDialogTitle>
+                        <AlertDialogDescription asChild>
+                            <div className="space-y-3">
+                                <p>Encontramos um cadastro na plataforma com esse CPF:</p>
+                                <div className="rounded-md border bg-muted p-3 text-sm space-y-1">
+                                    <p><span className="text-muted-foreground">Nome:</span> <strong>{foundProfile?.name || '—'}</strong></p>
+                                    <p><span className="text-muted-foreground">E-mail:</span> <strong>{foundProfile?.email}</strong></p>
+                                    {foundProfile?.status === 'pre_registered' && (
+                                        <Badge variant="secondary" className="mt-1">Pré-cadastrado</Badge>
+                                    )}
+                                </div>
+                                <p>Deseja associar este cliente ao seu clube?</p>
+                            </div>
+                        </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                        <AlertDialogCancel onClick={() => pendingSubmitRef.current = null}>
+                            Cancelar
+                        </AlertDialogCancel>
+                        <AlertDialogAction onClick={handleConfirmLink}>
+                            Sim, vincular ao clube
+                        </AlertDialogAction>
+                    </AlertDialogFooter>
+                </AlertDialogContent>
+            </AlertDialog>
+
+            {/* ── Header da página ── */}
             <div className="flex items-center justify-between">
                 <div>
                     <h1 className="text-3xl font-bold tracking-tight">Clientes</h1>
                     <p className="text-muted-foreground">Gerencie os vínculos de clientes do clube.</p>
                 </div>
 
-                <Dialog open={openCreate} onOpenChange={(o) => { setOpenCreate(o); if (!o) { setCpfInput(''); setPhoneInput('') } }}>
+                {/* ── Dialog: Novo Cliente ── */}
+                <Dialog
+                    open={openCreate}
+                    onOpenChange={(o) => {
+                        setOpenCreate(o)
+                        if (!o) resetCreateForm()
+                    }}
+                >
                     <DialogTrigger asChild>
                         <Button><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
                     </DialogTrigger>
                     <DialogContent>
                         <DialogHeader>
-                            <DialogTitle>Vincular Cliente</DialogTitle>
+                            <DialogTitle>Vincular ou Cadastrar Cliente</DialogTitle>
                             <DialogDescription>
-                                Se o cliente já tiver conta no sistema, será vinculado automaticamente pelo CPF ou email.
-                                Caso contrário, será criado um cadastro manual para o clube.
+                                Informe o CPF do cliente. Se ele já estiver na plataforma, o sistema localizará e criará o vínculo. Caso contrário, um pré-cadastro será gerado.
                             </DialogDescription>
                         </DialogHeader>
+
                         <form onSubmit={handleCreate} className="space-y-4">
+
+                            {/* CPF */}
                             <div className="space-y-2">
-                                <Label htmlFor="create-name">Nome <span className="text-destructive">*</span></Label>
-                                <Input id="create-name" name="name" placeholder="João Silva" required />
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="create-email">Email</Label>
-                                <Input id="create-email" name="email" type="email" placeholder="joao@email.com" />
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="create-cpf">CPF / Documento</Label>
+                                <Label htmlFor="create-cpf">
+                                    CPF <span className="text-destructive">*</span>
+                                </Label>
+                                <div className="relative">
                                     <Input
                                         id="create-cpf"
                                         name="cpf"
                                         placeholder="000.000.000-00"
                                         value={cpfInput}
-                                        onChange={(e) => setCpfInput(formatCpf(e.target.value))}
+                                        onChange={(e) => {
+                                            const formatted = formatCpf(e.target.value)
+                                            setCpfInput(formatted)
+                                            if (cpfCheckState !== 'idle') setCpfCheckState('idle')
+                                        }}
+                                        onBlur={handleCpfBlur}
+                                        required
+                                        className={
+                                            cpfCheckState === 'found' ? 'border-green-500 focus-visible:ring-green-500' :
+                                            cpfCheckState === 'member' ? 'border-destructive focus-visible:ring-destructive' :
+                                            ''
+                                        }
+                                    />
+                                    {cpfCheckState === 'checking' && (
+                                        <div className="absolute right-3 top-2.5">
+                                            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Feedback do status do CPF */}
+                            {cpfCheckState === 'member' && (
+                                <div className="flex items-center gap-2 rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                                    <AlertCircle className="h-4 w-4 shrink-0" />
+                                    <span>Este CPF já está vinculado como cliente deste clube.</span>
+                                </div>
+                            )}
+                            {cpfCheckState === 'found' && foundProfile && (
+                                <div className="flex items-start gap-2 rounded-md border border-green-500/50 bg-green-50 px-3 py-2 text-sm text-green-800 dark:bg-green-950/30 dark:text-green-200">
+                                    <UserCheck className="mt-0.5 h-4 w-4 shrink-0 text-green-600" />
+                                    <span>
+                                        Cliente encontrado: <strong>{foundProfile.name}</strong>. Confirme para vincular ao clube.
+                                    </span>
+                                </div>
+                            )}
+                            {cpfCheckState === 'not-found' && (
+                                <div className="flex items-start gap-2 rounded-md border bg-muted px-3 py-2 text-sm text-muted-foreground">
+                                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                                    <span>CPF não encontrado na plataforma. Preencha os dados abaixo para criar um pré-cadastro.</span>
+                                </div>
+                            )}
+
+                            {/* Demais campos */}
+                            <div className="space-y-2">
+                                <Label htmlFor="create-name">Nome <span className="text-destructive">*</span></Label>
+                                <Input
+                                    id="create-name"
+                                    name="name"
+                                    placeholder="João Silva"
+                                    required
+                                    disabled={fieldsLocked}
+                                    value={nameInput}
+                                    onChange={(e) => setNameInput(e.target.value)}
+                                />
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="create-email">E-mail <span className="text-destructive">*</span></Label>
+                                    <Input
+                                        id="create-email"
+                                        name="email"
+                                        type="email"
+                                        placeholder="joao@email.com"
+                                        required
+                                        disabled={fieldsLocked || cpfCheckState === 'found'}
+                                        value={emailInput}
+                                        onChange={(e) => setEmailInput(e.target.value)}
                                     />
                                 </div>
                                 <div className="space-y-2">
@@ -167,18 +375,42 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                                         id="create-phone"
                                         name="phone"
                                         placeholder="(11) 99999-9999"
+                                        disabled={fieldsLocked}
                                         value={phoneInput}
                                         onChange={(e) => setPhoneInput(formatPhone(e.target.value))}
                                     />
                                 </div>
                             </div>
+
                             <div className="space-y-2">
                                 <Label htmlFor="create-notes">Observações internas</Label>
-                                <Textarea id="create-notes" name="notes" placeholder="Anotações visíveis apenas para o clube..." rows={2} />
+                                <Textarea
+                                    id="create-notes"
+                                    name="notes"
+                                    placeholder="Anotações visíveis apenas para o clube..."
+                                    rows={2}
+                                    disabled={fieldsLocked}
+                                />
                             </div>
+
                             <DialogFooter>
-                                <Button type="submit" disabled={loading}>
-                                    {loading ? 'Salvando...' : 'Vincular Cliente'}
+                                <Button
+                                    type="submit"
+                                    disabled={
+                                        loading ||
+                                        cpfCheckState === 'checking' ||
+                                        cpfCheckState === 'member' ||
+                                        cpfCheckState === 'idle' ||
+                                        !cpfInput
+                                    }
+                                >
+                                    {loading ? (
+                                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Salvando...</>
+                                    ) : cpfCheckState === 'found' ? (
+                                        'Confirmar Vínculo'
+                                    ) : (
+                                        'Criar Pré-cadastro'
+                                    )}
                                 </Button>
                             </DialogFooter>
                         </form>
@@ -186,14 +418,18 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                 </Dialog>
             </div>
 
+            {/* ── Card: lista de clientes ── */}
             <Card>
                 <CardHeader>
                     <div className="flex items-center justify-between gap-4">
-                        <CardTitle>Lista de Clientes <span className="text-muted-foreground font-normal text-sm">({customers.length})</span></CardTitle>
+                        <CardTitle>
+                            Lista de Clientes{' '}
+                            <span className="text-muted-foreground font-normal text-sm">({customers.length})</span>
+                        </CardTitle>
                         <div className="relative w-64">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
-                                placeholder="Buscar por nome, email ou CPF..."
+                                placeholder="Nome, email ou CPF..."
                                 className="pl-8"
                                 value={search}
                                 onChange={(e) => setSearch(e.target.value)}
@@ -206,9 +442,9 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                         <TableHeader>
                             <TableRow>
                                 <TableHead>Nome</TableHead>
-                                <TableHead>Email</TableHead>
+                                <TableHead>E-mail</TableHead>
                                 <TableHead>Telefone</TableHead>
-                                <TableHead>CPF / Doc.</TableHead>
+                                <TableHead>CPF</TableHead>
                                 <TableHead>Conta</TableHead>
                                 <TableHead>Status</TableHead>
                                 <TableHead>Vínculo</TableHead>
@@ -222,112 +458,108 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                                         {search ? 'Nenhum cliente encontrado para esta busca.' : 'Nenhum cliente vinculado.'}
                                     </TableCell>
                                 </TableRow>
-                            ) : filtered.map((customer) => (
-                                <TableRow key={customer.id}>
-                                    <TableCell className="font-medium">{customer.name}</TableCell>
-                                    <TableCell className="text-sm">{customer.email || '—'}</TableCell>
-                                    <TableCell className="text-sm">{customer.phone || '—'}</TableCell>
-                                    <TableCell className="text-sm font-mono">{customer.cpf || '—'}</TableCell>
-                                    <TableCell>
-                                        {customer.profile_id ? (
-                                            <Badge variant="default" className="gap-1">
-                                                <LinkIcon className="h-3 w-3" />
-                                                Com conta
+                            ) : filtered.map((customer) => {
+                                const p = customer.profile
+                                return (
+                                    <TableRow key={customer.id}>
+                                        <TableCell className="font-medium">{p?.name || '—'}</TableCell>
+                                        <TableCell className="text-sm">{p?.email || '—'}</TableCell>
+                                        <TableCell className="text-sm">{p?.phone || '—'}</TableCell>
+                                        <TableCell className="text-sm font-mono">{p?.cpf || '—'}</TableCell>
+                                        <TableCell>
+                                            {p?.status === 'pre_registered' ? (
+                                                <Badge variant="secondary" className="gap-1">
+                                                    <LinkIcon className="h-3 w-3" />
+                                                    Pré-cadastro
+                                                </Badge>
+                                            ) : (
+                                                <Badge variant="default" className="gap-1">
+                                                    <LinkIcon className="h-3 w-3" />
+                                                    Com conta
+                                                </Badge>
+                                            )}
+                                        </TableCell>
+                                        <TableCell>
+                                            <Badge variant={customer.active ? 'default' : 'outline'}>
+                                                {customer.active ? 'Ativo' : 'Inativo'}
                                             </Badge>
-                                        ) : (
-                                            <Badge variant="secondary">Manual</Badge>
-                                        )}
-                                    </TableCell>
-                                    <TableCell>
-                                        <Badge variant={customer.active ? 'default' : 'outline'}>
-                                            {customer.active ? 'Ativo' : 'Inativo'}
-                                        </Badge>
-                                    </TableCell>
-                                    <TableCell className="text-sm text-muted-foreground">
-                                        {new Date(customer.joined_at).toLocaleDateString('pt-BR')}
-                                    </TableCell>
-                                    <TableCell className="text-right">
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => {
-                                                setEditingCustomer(customer)
-                                                setEditCpf(customer.cpf || '')
-                                                setEditPhone(customer.phone || '')
-                                            }}
-                                            title="Editar vínculo"
-                                        >
-                                            <Pencil className="h-4 w-4" />
-                                        </Button>
-                                        <Button
-                                            variant="ghost"
-                                            size="icon"
-                                            onClick={() => handleToggleActive(customer)}
-                                            title={customer.active ? 'Inativar cliente' : 'Ativar cliente'}
-                                        >
-                                            {customer.active
-                                                ? <UserX className="h-4 w-4 text-destructive" />
-                                                : <UserCheck className="h-4 w-4 text-green-600" />
-                                            }
-                                        </Button>
-                                    </TableCell>
-                                </TableRow>
-                            ))}
+                                        </TableCell>
+                                        <TableCell className="text-sm text-muted-foreground">
+                                            {new Date(customer.joined_at).toLocaleDateString('pt-BR')}
+                                        </TableCell>
+                                        <TableCell className="text-right">
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => {
+                                                    setEditingCustomer(customer)
+                                                    setEditPhone(customer.profile?.phone || '')
+                                                }}
+                                                title="Editar vínculo"
+                                            >
+                                                <Pencil className="h-4 w-4" />
+                                            </Button>
+                                            <Button
+                                                variant="ghost"
+                                                size="icon"
+                                                onClick={() => handleToggleActive(customer)}
+                                                title={customer.active ? 'Inativar cliente' : 'Ativar cliente'}
+                                            >
+                                                {customer.active
+                                                    ? <UserX className="h-4 w-4 text-destructive" />
+                                                    : <UserCheck className="h-4 w-4 text-green-600" />
+                                                }
+                                            </Button>
+                                        </TableCell>
+                                    </TableRow>
+                                )
+                            })}
                         </TableBody>
                     </Table>
                 </CardContent>
             </Card>
 
-            {/* Dialog Editar */}
+            {/* ── Dialog: Editar Cliente ── */}
             <Dialog open={!!editingCustomer} onOpenChange={(o) => { if (!o) setEditingCustomer(null) }}>
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Editar Vínculo de Cliente</DialogTitle>
                         <DialogDescription>
-                            {editingCustomer?.profile_id
-                                ? 'Este cliente possui conta no sistema. Apenas as observações internas e telefone podem ser editados pelo clube.'
-                                : 'Atualize os dados do cadastro manual deste cliente no clube.'}
+                            {isPreRegistered(editingCustomer!)
+                                ? 'Conta pré-cadastrada. Você pode editar nome, e-mail e telefone. CPF é imutável.'
+                                : 'Este cliente possui conta ativa. Apenas observações internas podem ser editadas pelo clube.'}
                         </DialogDescription>
                     </DialogHeader>
                     {editingCustomer && (
                         <form onSubmit={handleUpdate} className="space-y-4">
+
+                            {/* Nome */}
                             <div className="space-y-2">
-                                <Label htmlFor="edit-name">Nome <span className="text-destructive">*</span></Label>
-                                <Input id="edit-name" name="name" defaultValue={editingCustomer.name} required />
+                                <Label htmlFor="edit-name">Nome</Label>
+                                <Input
+                                    id="edit-name"
+                                    name="name"
+                                    defaultValue={editingCustomer.profile?.name ?? ''}
+                                    disabled={!isPreRegistered(editingCustomer)}
+                                    className={!isPreRegistered(editingCustomer) ? 'bg-muted' : ''}
+                                />
                             </div>
+
+                            {/* E-mail */}
                             <div className="space-y-2">
-                                <Label htmlFor="edit-email">Email</Label>
-                                {editingCustomer.profile_id ? (
-                                    <div className="flex items-center gap-2">
-                                        <Input
-                                            id="edit-email"
-                                            name="email"
-                                            value={editingCustomer.profile?.email || editingCustomer.email || ''}
-                                            disabled
-                                            className="bg-muted"
-                                        />
-                                        <Badge variant="default" className="shrink-0 gap-1">
-                                            <LinkIcon className="h-3 w-3" />
-                                            Com conta
-                                        </Badge>
-                                    </div>
-                                ) : (
-                                    <Input id="edit-email" name="email" type="email" defaultValue={editingCustomer.email ?? ''} />
-                                )}
+                                <Label htmlFor="edit-email">E-mail</Label>
+                                <Input
+                                    id="edit-email"
+                                    name="email"
+                                    type="email"
+                                    defaultValue={editingCustomer.profile?.email ?? ''}
+                                    disabled={!isPreRegistered(editingCustomer)}
+                                    className={!isPreRegistered(editingCustomer) ? 'bg-muted' : ''}
+                                />
                             </div>
+
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-2">
-                                    <Label htmlFor="edit-cpf">CPF / Documento</Label>
-                                    <Input
-                                        id="edit-cpf"
-                                        name="cpf"
-                                        placeholder="000.000.000-00"
-                                        value={editCpf}
-                                        onChange={(e) => setEditCpf(formatCpf(e.target.value))}
-                                        disabled={!!editingCustomer.profile_id}
-                                        className={editingCustomer.profile_id ? 'bg-muted' : ''}
-                                    />
-                                </div>
+                                {/* Telefone */}
                                 <div className="space-y-2">
                                     <Label htmlFor="edit-phone">Telefone</Label>
                                     <Input
@@ -336,9 +568,26 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                                         placeholder="(11) 99999-9999"
                                         value={editPhone}
                                         onChange={(e) => setEditPhone(formatPhone(e.target.value))}
+                                        disabled={!isPreRegistered(editingCustomer)}
+                                        className={!isPreRegistered(editingCustomer) ? 'bg-muted' : ''}
+                                    />
+                                </div>
+
+                                {/* CPF — sempre bloqueado */}
+                                <div className="space-y-2">
+                                    <Label htmlFor="edit-cpf" className="flex items-center gap-1">
+                                        CPF <Lock className="h-3 w-3 text-muted-foreground" />
+                                    </Label>
+                                    <Input
+                                        id="edit-cpf"
+                                        value={editingCustomer.profile?.cpf ?? '—'}
+                                        disabled
+                                        className="bg-muted font-mono"
                                     />
                                 </div>
                             </div>
+
+                            {/* Notes — sempre editável */}
                             <div className="space-y-2">
                                 <Label htmlFor="edit-notes">Observações internas</Label>
                                 <Textarea
@@ -349,6 +598,7 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                                     rows={2}
                                 />
                             </div>
+
                             <DialogFooter>
                                 <Button type="button" variant="outline" onClick={() => setEditingCustomer(null)}>
                                     Cancelar

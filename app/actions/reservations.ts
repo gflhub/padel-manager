@@ -42,6 +42,20 @@ export async function getReservations(filters?: { date?: string; status?: string
     return { data, error: null }
 }
 
+// ─────────────────────────────────────────────────────────────
+// Fluxo secundário assíncrono: garante que o cliente está associado
+// ao clube no momento da reserva. Idempotente — ignoreDuplicates.
+// ─────────────────────────────────────────────────────────────
+async function ensureClubMembership(profileId: string, clubId: string) {
+    const service = createServiceClient()
+    await service
+        .from('club_members')
+        .upsert(
+            { club_id: clubId, profile_id: profileId, active: true },
+            { onConflict: 'club_id,profile_id', ignoreDuplicates: true }
+        )
+}
+
 export async function createReservation(formData: FormData) {
     const supabase = await createClient()
     const { data: { user } } = await supabase.auth.getUser()
@@ -96,6 +110,11 @@ export async function createReservation(formData: FormData) {
         .single()
 
     if (error) return { error: error.message }
+
+    // Disparo assíncrono — não bloqueia a resposta ao cliente
+    // Verifica se já é membro; se não for, associa ao clube
+    queueMicrotask(() => ensureClubMembership(user.id, court.club_id))
+
     revalidatePath('/reservations')
     revalidatePath('/admin/reservations')
     return { data, error: null }
