@@ -1,18 +1,9 @@
 'use server'
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { getClubContext } from '@/lib/get-club-role'
+import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
-
-async function assertStaffContext() {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { ctx: null, error: 'Não autorizado' as const }
-    const ctx = await getClubContext(user.id)
-    if (!ctx) return { ctx: null, error: 'Sem permissão' as const }
-    return { ctx: { ...ctx, userId: user.id }, error: null }
-}
+import * as productRepo from '@/lib/repositories/products'
 
 const productSchema = z.object({
     name: z.string().min(1, 'Nome é obrigatório'),
@@ -23,60 +14,97 @@ const productSchema = z.object({
 })
 
 export async function getProducts(category?: string) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro', data: null }
-    const service = createServiceClient()
-    let query = service.from('products').select('*').eq('club_id', ctx.clubId).order('category').order('name')
-    if (category) query = query.eq('category', category)
-    const { data, error } = await query
-    if (error) return { error: error.message, data: null }
-    return { data, error: null }
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        return productRepo.getProductsByClub(context.clubId, category)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao buscar produtos'
+        return { error: message, data: null }
+    }
 }
 
 export async function createProduct(formData: FormData) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro' }
-    const raw = {
-        name: formData.get('name') as string,
-        category: formData.get('category') as string,
-        price: formData.get('price'),
-        stock: formData.get('stock'),
-        active: formData.get('active') === 'true',
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+
+        const raw = {
+            name: formData.get('name') as string,
+            category: formData.get('category') as string,
+            price: formData.get('price'),
+            stock: formData.get('stock'),
+            active: formData.get('active') === 'true',
+        }
+        const parsed = productSchema.safeParse(raw)
+        if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+        const result = await productRepo.createProduct(
+            context.clubId,
+            parsed.data.name,
+            parsed.data.category as 'bebidas' | 'lanches' | 'doces' | 'outros',
+            parsed.data.price,
+            parsed.data.stock,
+            parsed.data.active
+        )
+
+        if (result.error) return { error: result.error }
+        revalidatePath('/admin/products')
+        return { data: result.data, error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao criar produto'
+        return { error: message }
     }
-    const parsed = productSchema.safeParse(raw)
-    if (!parsed.success) return { error: parsed.error.issues[0].message }
-    const service = createServiceClient()
-    const { data, error } = await service.from('products').insert({ ...parsed.data, club_id: ctx.clubId }).select().single()
-    if (error) return { error: error.message }
-    revalidatePath('/admin/products')
-    return { data, error: null }
 }
 
 export async function updateProduct(id: string, formData: FormData) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro' }
-    const raw = {
-        name: formData.get('name') as string,
-        category: formData.get('category') as string,
-        price: formData.get('price'),
-        stock: formData.get('stock'),
-        active: formData.get('active') === 'true',
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+
+        const raw = {
+            name: formData.get('name') as string,
+            category: formData.get('category') as string,
+            price: formData.get('price'),
+            stock: formData.get('stock'),
+            active: formData.get('active') === 'true',
+        }
+        const parsed = productSchema.safeParse(raw)
+        if (!parsed.success) return { error: parsed.error.issues[0].message }
+
+        const result = await productRepo.updateProduct(
+            id,
+            context.clubId,
+            {
+                name: parsed.data.name,
+                category: parsed.data.category as 'bebidas' | 'lanches' | 'doces' | 'outros',
+                price: parsed.data.price,
+                stock: parsed.data.stock,
+                active: parsed.data.active,
+            }
+        )
+
+        if (result.error) return { error: result.error }
+        revalidatePath('/admin/products')
+        return { data: result.data, error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao atualizar produto'
+        return { error: message }
     }
-    const parsed = productSchema.safeParse(raw)
-    if (!parsed.success) return { error: parsed.error.issues[0].message }
-    const service = createServiceClient()
-    const { data, error } = await service.from('products').update(parsed.data).eq('id', id).eq('club_id', ctx.clubId).select().single()
-    if (error) return { error: error.message }
-    revalidatePath('/admin/products')
-    return { data, error: null }
 }
 
 export async function deleteProduct(id: string) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro' }
-    const service = createServiceClient()
-    const { error } = await service.from('products').delete().eq('id', id).eq('club_id', ctx.clubId)
-    if (error) return { error: error.message }
-    revalidatePath('/admin/products')
-    return { error: null }
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+
+        const result = await productRepo.deleteProduct(id, context.clubId)
+        if (result.error) return { error: result.error }
+
+        revalidatePath('/admin/products')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao deletar produto'
+        return { error: message }
+    }
 }

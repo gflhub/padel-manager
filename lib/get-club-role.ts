@@ -1,61 +1,53 @@
 'use server'
 
-import { createClient as createServiceClient } from '@supabase/supabase-js'
-
-function getService() {
-    return createServiceClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        { auth: { autoRefreshToken: false, persistSession: false } }
-    )
-}
+import { prisma } from '@/lib/db/prisma'
 
 /**
- * Retorna o role do usuário no primeiro clube ao qual está vinculado como staff.
- * Retorna null se não for staff de nenhum clube.
+ * Return user's role at their first club staff assignment.
+ * Returns null if not staff at any club.
  */
 export async function getClubRole(profileId: string): Promise<string | null> {
-    const { data } = await getService()
-        .from('club_staff')
-        .select('role')
-        .eq('profile_id', profileId)
-        .eq('active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single()
+    const staff = await prisma.clubStaff.findFirst({
+        where: {
+            profileId,
+            active: true
+        },
+        select: { role: true },
+        orderBy: { createdAt: 'asc' }
+    })
 
-    return data?.role ?? null
+    return staff?.role ?? null
 }
 
 /**
- * Retorna o club_id do primeiro clube em que o usuário é staff.
+ * Return the club_id of the first club where user is staff.
  */
 export async function getClubId(profileId: string): Promise<string | null> {
-    const { data } = await getService()
-        .from('club_staff')
-        .select('club_id')
-        .eq('profile_id', profileId)
-        .eq('active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single()
+    const staff = await prisma.clubStaff.findFirst({
+        where: {
+            profileId,
+            active: true
+        },
+        select: { clubId: true },
+        orderBy: { createdAt: 'asc' }
+    })
 
-    return data?.club_id ?? null
+    return staff?.clubId ?? null
 }
 
 /**
- * Retorna { clubId, role } do usuário, ou null se não for staff.
+ * Return { clubId, role } for user, or null if not staff.
  */
 export async function getClubContext(profileId: string): Promise<{ clubId: string; role: string } | null> {
-    const { data } = await getService()
-        .from('club_staff')
-        .select('club_id, role')
-        .eq('profile_id', profileId)
-        .eq('active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single()
+    const staff = await prisma.clubStaff.findFirst({
+        where: {
+            profileId,
+            active: true
+        },
+        select: { clubId: true, role: true },
+        orderBy: { createdAt: 'asc' }
+    })
 
-    if (!data) return null
-    return { clubId: data.club_id, role: data.role }
+    if (!staff) return null
+    return { clubId: staff.clubId, role: staff.role }
 }

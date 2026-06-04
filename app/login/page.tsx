@@ -1,7 +1,6 @@
 'use client'
 
 import { useState } from 'react'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -10,6 +9,8 @@ import { Separator } from "@/components/ui/separator"
 import { Chrome, Loader2 } from "lucide-react"
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
+import { signIn, signUp, checkUserStaffRole } from '@/app/actions/auth'
+import { getCurrentUser } from '@/lib/auth/session'
 
 export default function LoginPage() {
     const router = useRouter()
@@ -24,49 +25,42 @@ export default function LoginPage() {
         const email = formData.get('email') as string
         const password = formData.get('password') as string
 
-        const supabase = createClient()
-
         if (isSignUp) {
-            const { error } = await supabase.auth.signUp({
-                email,
-                password,
-                options: {
-                    emailRedirectTo: `${window.location.origin}/auth/callback`,
-                },
-            })
+            const result = await signUp(email, password)
 
-            if (error) {
-                toast.error(error.message)
+            if (result.error) {
+                toast.error(result.error)
                 setLoading(false)
             } else {
-                toast.success('Verifique seu email para confirmar o cadastro!')
-                setLoading(false)
+                toast.success('Conta criada com sucesso!')
+                const user = await getCurrentUser()
+                if (user) {
+                    const staffResult = await checkUserStaffRole(user.id)
+                    if (staffResult.isStaff) {
+                        router.push('/staff/dashboard')
+                    } else {
+                        router.push('/reservations')
+                    }
+                }
+                router.refresh()
             }
         } else {
-            const { data, error } = await supabase.auth.signInWithPassword({
-                email,
-                password,
-            })
+            const result = await signIn(email, password)
 
-            if (error) {
+            if (result.error) {
                 toast.error('Email ou senha incorretos')
                 setLoading(false)
-            } else if (data.user) {
-                // Verificar se é staff de algum clube
-                const { data: staffData } = await supabase
-                    .from('club_staff')
-                    .select('role')
-                    .eq('profile_id', data.user.id)
-                    .eq('active', true)
-                    .limit(1)
-                    .single()
-
+            } else if (result.data) {
                 toast.success('Login realizado com sucesso!')
 
-                if (staffData) {
-                    router.push('/dashboard')
-                } else {
-                    router.push('/home')
+                const user = await getCurrentUser()
+                if (user) {
+                    const staffResult = await checkUserStaffRole(user.id)
+                    if (staffResult.isStaff) {
+                        router.push('/staff/dashboard')
+                    } else {
+                        router.push('/reservations')
+                    }
                 }
                 router.refresh()
             }
@@ -75,19 +69,8 @@ export default function LoginPage() {
 
     const handleGoogleLogin = async () => {
         setLoading(true)
-        const supabase = createClient()
-
-        const { error } = await supabase.auth.signInWithOAuth({
-            provider: 'google',
-            options: {
-                redirectTo: `${window.location.origin}/auth/callback`,
-            },
-        })
-
-        if (error) {
-            toast.error(error.message)
-            setLoading(false)
-        }
+        toast.info('Autenticação com Google será disponibilizada em breve')
+        setLoading(false)
     }
 
     return (

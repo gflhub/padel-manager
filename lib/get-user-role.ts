@@ -1,27 +1,15 @@
 'use server'
 
-import { createClient as createServiceClient } from '@supabase/supabase-js'
+import { prisma } from '@/lib/db/prisma'
 
 /**
- * Busca o role do usuário usando service role para evitar problemas de RLS
+ * Fetch user's global role using Prisma
  */
 export async function getUserRole(userId: string): Promise<string | null> {
-    const serviceClient = createServiceClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        {
-            auth: {
-                autoRefreshToken: false,
-                persistSession: false
-            }
-        }
-    )
+    const user = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { globalRole: true }
+    })
 
-    const { data } = await serviceClient
-        .from('users')
-        .select('role')
-        .eq('id', userId)
-        .single()
-
-    return data?.role || null
+    return user?.globalRole || null
 }

@@ -1,6 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { createServiceClient } from '@/lib/supabase/server'
-import { createClient } from '@/lib/supabase/server'
 
 const GITHUB_API_URL = 'https://api.github.com'
 const GITHUB_GRAPHQL_URL = 'https://api.github.com/graphql'
@@ -227,18 +225,10 @@ export async function POST(request: NextRequest) {
       browser_info,
     } = body
 
-    // Tenta pegar o usuário autenticado para enriquecer o reporte
-    let userId: string | null = null
+    // TODO: Feedback feature needs to be migrated to Prisma with a Feedback model
+    // For now, skip DB storage and only create Linear issue if configured
     let resolvedName = user_name
     let resolvedEmail = user_email
-    try {
-      const supabase = await createClient()
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        userId = user.id
-        if (!resolvedEmail) resolvedEmail = user.email ?? null
-      }
-    } catch {/* continua sem autenticação */}
 
     // Título final da issue
     const prefix = category ? (TITLE_PREFIX_MAP[category] ?? '📝 [Feedback]') : '📝 [Feedback]'
@@ -259,36 +249,11 @@ export async function POST(request: NextRequest) {
       browserInfo: browser_info,
     })
 
-    // Salva no Supabase
-    const service = createServiceClient()
-    const { data: savedReport, error: dbError } = await service
-      .from('feedback_reports')
-      .insert({
-        user_id: userId,
-        user_name: resolvedName,
-        user_email: resolvedEmail,
-        current_page,
-        service_feature,
-        category,
-        title,
-        description,
-        session_log,
-        browser_info: browser_info ?? session_log?.browserInfo ?? null,
-      })
-      .select('id')
-      .single()
-
-    if (dbError) {
-      console.error('[feedback] DB error:', dbError)
-    }
-
-    // Configurações do GitHub
-    const ghToken = process.env.GITHUB_TOKEN
-    const ghOrg = process.env.GITHUB_ORG
-    const ghRepo = process.env.GITHUB_REPO
-    const ghProjectNumber = process.env.GITHUB_PROJECT_NUMBER
-      ? parseInt(process.env.GITHUB_PROJECT_NUMBER, 10)
-      : null
+    // Cria issue no Linear se configurado
+    const apiKey = process.env.LINEAR_API_KEY
+    const teamId = process.env.LINEAR_TEAM_ID
+    const projectId = process.env.LINEAR_PROJECT_ID ?? null
+    let linearIssueUrl: string | null = null
 
     let githubIssueId: string | null = null
     let githubIssueUrl: string | null = null
@@ -306,44 +271,16 @@ export async function POST(request: NextRequest) {
       })
 
       if (issue) {
-        githubIssueId = String(issue.id)
-        githubIssueUrl = issue.url
-
-        // Adiciona ao GitHub Project v2 se o número de projeto estiver configurado
-        if (ghProjectNumber) {
-          const projectNodeId = await getProjectNodeId({
-            token: ghToken,
-            org: ghOrg,
-            projectNumber: ghProjectNumber,
-          })
-
-          if (projectNodeId) {
-            await addIssueToProject({
-              token: ghToken,
-              projectNodeId,
-              issueNodeId: issue.nodeId,
-            })
-          } else {
-            console.warn('[feedback] Projeto GitHub não encontrado para o número:', ghProjectNumber)
-          }
-        }
-
-        // Atualiza o registro no Supabase com os dados da issue
-        if (savedReport?.id) {
-          await service
-            .from('feedback_reports')
-            .update({ issue_tracker_id: githubIssueId, issue_tracker_url: githubIssueUrl })
-            .eq('id', savedReport.id)
-        }
+        linearIssueUrl = issue.url
       }
     } else {
-      console.warn('[feedback] GITHUB_TOKEN, GITHUB_ORG ou GITHUB_REPO não configurados.')
+      console.warn('[feedback] LINEAR_API_KEY ou LINEAR_TEAM_ID não configurados.')
     }
 
     return NextResponse.json({
       success: true,
-      reportId: savedReport?.id ?? null,
-      linearIssueUrl: githubIssueUrl, // mantém o campo para o frontend não precisar mudar
+      reportId: null,
+      linearIssueUrl,
     })
   } catch (err) {
     console.error('[feedback] Unexpected error:', err)

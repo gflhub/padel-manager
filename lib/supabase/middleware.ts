@@ -1,51 +1,40 @@
-import { createServerClient } from '@supabase/ssr'
 import { NextResponse, type NextRequest } from 'next/server'
+import { verifyAccessToken } from '@/lib/auth/tokens'
+
+function isAuthRoute(pathname: string) {
+    return pathname.startsWith('/login') || pathname.startsWith('/auth')
+}
+
+function redirectToLogin(request: NextRequest) {
+    const url = request.nextUrl.clone()
+    url.pathname = '/login'
+    url.searchParams.set('next', `${request.nextUrl.pathname}${request.nextUrl.search}`)
+    return NextResponse.redirect(url)
+}
 
 export async function updateSession(request: NextRequest) {
-    let supabaseResponse = NextResponse.next({
-        request,
-    })
+    let response = NextResponse.next({ request })
 
-    const supabase = createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            cookies: {
-                getAll() {
-                    return request.cookies.getAll()
-                },
-                setAll(cookiesToSet: Array<{ name: string; value: string; options?: Record<string, unknown> }>) {
-                    cookiesToSet.forEach(({ name, value }: { name: string; value: string }) => request.cookies.set(name, value))
-                    supabaseResponse = NextResponse.next({
-                        request,
-                    })
-                    cookiesToSet.forEach(({ name, value, options }: { name: string; value: string; options?: Record<string, unknown> }) =>
-                        supabaseResponse.cookies.set(name, value, options)
-                    )
-                },
-            },
+    // JWT verification (app-owned tokens via Prisma auth system)
+    try {
+        const accessToken = request.cookies.get('accessToken')?.value
+
+        if (accessToken) {
+            const payload = await verifyAccessToken(accessToken)
+
+            if (payload) {
+                // User is authenticated via JWT - continue
+                return response
+            }
         }
-    )
-
-    const {
-        data: { user },
-    } = await supabase.auth.getUser()
-
-    // Se acessar /login estando logado, faz logout automático
-    if (user && request.nextUrl.pathname === '/login') {
-        await supabase.auth.signOut()
-        return supabaseResponse
+    } catch (error) {
+        console.warn('JWT verification failed:', error instanceof Error ? error.message : error)
     }
 
-    if (
-        !user &&
-        !request.nextUrl.pathname.startsWith('/login') &&
-        !request.nextUrl.pathname.startsWith('/auth')
-    ) {
-        const url = request.nextUrl.clone()
-        url.pathname = '/login'
-        return NextResponse.redirect(url)
+    // No valid JWT found
+    if (isAuthRoute(request.nextUrl.pathname)) {
+        return response
     }
 
-    return supabaseResponse
+    return redirectToLogin(request)
 }

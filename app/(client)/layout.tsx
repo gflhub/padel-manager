@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db/prisma'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -14,37 +14,33 @@ export default async function ClientLayout({
 }: {
     children: React.ReactNode
 }) {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
+    // TODO: Get userId from session/middleware
+    const userId = null
+    if (!userId) {
         redirect('/login')
     }
 
-    const service = createServiceClient()
+    const profile = await prisma.profile.findUnique({
+        where: { id: userId },
+        select: { name: true, email: true }
+    })
 
-    const { data: profileData } = await service
-        .from('profiles')
-        .select('name, email')
-        .eq('id', user.id)
-        .single()
-
-    // Verificar se tambem é staff de algum clube (para mostrar link admin)
-    const { data: staffData } = await service
-        .from('club_staff')
-        .select('role')
-        .eq('profile_id', user.id)
-        .eq('active', true)
-        .limit(1)
-        .single()
+    // Check if also staff of any club (for showing admin link)
+    const staff = await prisma.clubStaff.findFirst({
+        where: {
+            profileId: userId,
+            active: true
+        },
+        select: { id: true }
+    })
 
     const userData = {
-        name: profileData?.name,
-        email: profileData?.email ?? user.email,
-        isStaff: !!staffData,
+        name: profile?.name,
+        email: profile?.email,
+        isStaff: !!staff,
     }
 
-    const displayName = userData?.name || user.email?.split('@')[0] || 'Usuário'
+    const displayName = userData?.name || 'Usuário'
     const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
     const navItems = [

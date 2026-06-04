@@ -2,13 +2,13 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { createClient } from '@/lib/supabase/client'
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { createReservation } from "@/app/actions/reservations"
+import { createReservation, getAvailableCourts, getBookedSlots } from "@/app/actions/reservations"
+import { getProfile } from "@/app/actions/profiles"
 import { toast } from "sonner"
 import { ArrowLeft, Minus, Plus, Users, Clock, Calendar, ShieldCheck } from "lucide-react"
 import Link from 'next/link'
@@ -49,22 +49,23 @@ export default function NewReservationPage() {
     const [ownerName, setOwnerName] = useState('')
 
     useEffect(() => {
-        const supabase = createClient()
-        supabase.from('courts').select('*').eq('active', true).order('name')
-            .then(({ data }) => { if (data) setCourts(data) })
+        const loadCourts = async () => {
+            const result = await getAvailableCourts()
+            if (result.data) {
+                setCourts(result.data)
+            }
+        }
 
         const loadProfile = async () => {
-            const { data: { user } } = await supabase.auth.getUser()
-            if (!user) return
-            const { data: profile } = await supabase
-                .from('profiles')
-                .select('name')
-                .eq('id', user.id)
-                .single()
-            const name = profile?.name || user.email || ''
-            setOwnerName(name)
-            setPlayers([{ name }])
+            const result = await getProfile()
+            if (result.data) {
+                const name = result.data.name || ''
+                setOwnerName(name)
+                setPlayers([{ name }])
+            }
         }
+
+        loadCourts()
         loadProfile()
     }, [])
 
@@ -77,15 +78,8 @@ export default function NewReservationPage() {
                 return
             }
             setLoadingSlots(true)
-            const supabase = createClient()
-            const { data } = await supabase
-                .from('reservations')
-                .select('start_time, end_time')
-                .eq('court_id', selectedCourtId)
-                .eq('date', date)
-                .neq('status', 'cancelled')
-                .neq('status', 'no_show')
-            setBookedSlots((data as BookedSlot[]) || [])
+            const result = await getBookedSlots(selectedCourtId, date)
+            setBookedSlots(result.data || [])
             setLoadingSlots(false)
         }
         load()

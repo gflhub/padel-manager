@@ -1,47 +1,17 @@
-import { createServerClient } from '@supabase/ssr'
-import { createClient as createSupabaseClient } from '@supabase/supabase-js'
-import { cookies } from 'next/headers'
+/**
+ * DEPRECATED: Supabase client is no longer used for authentication or data access.
+ * The app has migrated to:
+ * - Prisma for all data access
+ * - JWT token auth for user sessions
+ *
+ * These functions are kept as stubs for backward compatibility during the transition period.
+ * They should not be used in new code.
+ */
 
 export async function createClient() {
-    const cookieStore = await cookies()
-
-    return createServerClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
-        {
-            cookies: {
-                getAll() {
-                    return cookieStore.getAll()
-                },
-                setAll(cookiesToSet) {
-                    try {
-                        cookiesToSet.forEach(({ name, value, options }) => {
-                            cookieStore.set(name, value, options)
-                        })
-                    } catch {
-                        // The `set` method was called from a Server Component.
-                        // This can be ignored if you have middleware refreshing
-                        // user sessions.
-                    }
-                },
-            },
-        }
-    )
+    throw new Error('Supabase client is no longer supported. Use Prisma for data access.')
 }
 
-/**
- * Cliente com service role — usa apenas em server actions administrativas.
- * NUNCA exponha essa função em rotas públicas ou client components.
- */
 export function createServiceClient() {
-    return createSupabaseClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.SUPABASE_SERVICE_ROLE_KEY!,
-        {
-            auth: {
-                autoRefreshToken: false,
-                persistSession: false,
-            },
-        }
-    )
+    throw new Error('Service role client is no longer supported. Use Prisma for data access.')
 }

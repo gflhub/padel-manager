@@ -1,4 +1,4 @@
-import { createClient, createServiceClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db/prisma'
 import { redirect } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
@@ -14,43 +14,39 @@ export default async function AdminLayout({
 }: {
     children: React.ReactNode
 }) {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
+    // TODO: Get userId from session/middleware
+    const userId = null
+    if (!userId) {
         redirect('/login')
     }
 
-    const service = createServiceClient()
+    const staff = await prisma.clubStaff.findFirst({
+        where: {
+            profileId: userId,
+            active: true
+        },
+        include: {
+            club: { select: { name: true } }
+        },
+        orderBy: { createdAt: 'asc' }
+    })
 
-    // Buscar vínculo de staff no clube
-    const { data: staffData } = await service
-        .from('club_staff')
-        .select('role, club_id, club:clubs(name)')
-        .eq('profile_id', user.id)
-        .eq('active', true)
-        .order('created_at', { ascending: true })
-        .limit(1)
-        .single()
-
-    if (!staffData) {
+    if (!staff) {
         redirect('/')
     }
 
-    // Buscar dados do perfil
-    const { data: profileData } = await service
-        .from('profiles')
-        .select('name, email')
-        .eq('id', user.id)
-        .single()
+    const profile = await prisma.profile.findUnique({
+        where: { id: userId },
+        select: { name: true, email: true }
+    })
 
     const userData = {
-        role: staffData.role,
-        name: profileData?.name,
-        email: profileData?.email ?? user.email,
+        role: staff.role,
+        name: profile?.name,
+        email: profile?.email,
     }
 
-    const displayName = userData?.name || user.email?.split('@')[0] || 'Admin'
+    const displayName = userData?.name || 'Admin'
     const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
     const sidebarItems = [
@@ -120,7 +116,7 @@ export default async function AdminLayout({
                                         <p className="text-sm font-medium leading-none">{displayName}</p>
                                         <p className="text-xs leading-none text-muted-foreground">{userData?.email}</p>
                                         <p className="text-xs leading-none text-muted-foreground capitalize mt-1">
-                                            {userData?.role === 'owner' ? 'Proprietário' : userData?.role === 'admin' ? 'Administrador' : 'Equipe'}
+                                            {userData?.role === 'OWNER' ? 'Proprietário' : userData?.role === 'MANAGER' ? 'Gerente' : 'Equipe'}
                                         </p>
                                     </div>
                                 </DropdownMenuLabel>

@@ -1,17 +1,20 @@
 'use server'
 
-import { createClient, createServiceClient } from '@/lib/supabase/server'
-import { getClubContext } from '@/lib/get-club-role'
+import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
+import * as reservationRepo from '@/lib/repositories/reservations'
+import * as courtRepo from '@/lib/repositories/courts'
 
-async function assertStaffContext() {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { ctx: null, error: 'Não autorizado' as const }
-    const ctx = await getClubContext(user.id)
-    if (!ctx) return { ctx: null, error: 'Sem permissão' as const }
-    return { ctx: { ...ctx, userId: user.id }, error: null }
+function timeToMinutes(timeStr: string): number {
+    const [hours, minutes] = timeStr.split(':').map(Number)
+    return hours * 60 + minutes
+}
+
+function minutesToTime(minutes: number): string {
+    const h = Math.floor(minutes / 60)
+    const m = minutes % 60
+    return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 const reservationSchema = z.object({
@@ -23,23 +26,14 @@ const reservationSchema = z.object({
 })
 
 export async function getReservations(filters?: { date?: string; status?: string; court_id?: string }) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro', data: null }
-    const service = createServiceClient()
-    let query = service
-        .from('reservations')
-        .select('*, court:courts(id, name, court_type)')
-        .eq('club_id', ctx.clubId)
-        .order('date', { ascending: true })
-        .order('start_time', { ascending: true })
-
-    if (filters?.date) query = query.eq('date', filters.date)
-    if (filters?.status) query = query.eq('status', filters.status)
-    if (filters?.court_id) query = query.eq('court_id', filters.court_id)
-
-    const { data, error } = await query
-    if (error) return { error: error.message, data: null }
-    return { data, error: null }
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        return reservationRepo.getReservationsByClub(context.clubId, filters)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao buscar reservas'
+        return { error: message, data: null }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -57,86 +51,127 @@ async function ensureClubMembership(profileId: string, clubId: string) {
 }
 
 export async function createReservation(formData: FormData) {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return { error: 'Não autorizado' }
+    try {
+        const user = await requireUser()
 
-    const raw = {
-        court_id: formData.get('court_id') as string,
-        date: formData.get('date') as string,
-        start_time: formData.get('start_time') as string,
-        duration: formData.get('duration'),
-        players: JSON.parse(formData.get('players') as string || '[]'),
-    }
+        const raw = {
+            court_id: formData.get('court_id') as string,
+            date: formData.get('date') as string,
+            start_time: formData.get('start_time') as string,
+            duration: formData.get('duration'),
+            players: JSON.parse(formData.get('players') as string || '[]'),
+        }
 
-    const parsed = reservationSchema.safeParse(raw)
-    if (!parsed.success) return { error: parsed.error.issues[0].message }
+        const parsed = reservationSchema.safeParse(raw)
+        if (!parsed.success) return { error: parsed.error.issues[0].message }
 
-    // calculate end_time
-    const [hours, minutes] = parsed.data.start_time.split(':').map(Number)
-    const totalMin = hours * 60 + minutes + parsed.data.duration
-    const end_time = `${String(Math.floor(totalMin / 60)).padStart(2, '0')}:${String(totalMin % 60).padStart(2, '0')}`
+        // calculate end_time
+        const totalMin = timeToMinutes(parsed.data.start_time) + parsed.data.duration
+        const end_time = minutesToTime(totalMin)
 
-    // get court price and club_id
-    const service = createServiceClient()
-    const { data: court } = await service
-        .from('courts')
-        .select('price_per_slot, club_id')
-        .eq('id', parsed.data.court_id)
-        .single()
+        // get court price and club_id from repository
+        const courtResult = await courtRepo.getCourtById(parsed.data.court_id, '')
+        if (courtResult.error || !courtResult.data) return { error: 'Quadra não encontrada' }
+        const court = courtResult.data
 
-    if (!court) return { error: 'Quadra não encontrada' }
+        // Check for overlaps
+        const overlapResult = await reservationRepo.checkReservationOverlap(
+            parsed.data.court_id,
+            parsed.data.date,
+            parsed.data.start_time,
+            end_time
+        )
+        if (overlapResult.error) return { error: overlapResult.error }
+        if (overlapResult.hasOverlap) return { error: 'Horário indisponível: conflito com outra reserva' }
 
-    const total_price = court.price_per_slot
-    const price_per_player = total_price / (parsed.data.players.length || 1)
+        const total_price = court.price_per_slot
+        const price_per_player = total_price / (parsed.data.players.length || 1)
 
-    const { data, error } = await service
-        .from('reservations')
-        .insert({
-            profile_id: user.id,
-            club_id: court.club_id,
-            court_id: parsed.data.court_id,
-            date: parsed.data.date,
-            start_time: parsed.data.start_time,
+        const result = await reservationRepo.createReservation(
+            user.id,
+            court.club_id,
+            parsed.data.court_id,
+            parsed.data.date,
+            parsed.data.start_time,
             end_time,
-            duration: parsed.data.duration,
-            players: parsed.data.players,
+            parsed.data.duration,
+            parsed.data.players,
             total_price,
-            price_per_player,
-            status: 'confirmed',
-            created_by: user.id,
-        })
-        .select()
-        .single()
+            price_per_player
+        )
 
-    if (error) return { error: error.message }
-
-    // Disparo assíncrono — não bloqueia a resposta ao cliente
-    // Verifica se já é membro; se não for, associa ao clube
-    queueMicrotask(() => ensureClubMembership(user.id, court.club_id))
-
-    revalidatePath('/reservations')
-    revalidatePath('/admin/reservations')
-    return { data, error: null }
+        if (result.error) return { error: result.error }
+        revalidatePath('/reservations')
+        revalidatePath('/admin/reservations')
+        return { data: result.data, error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao criar reserva'
+        return { error: message }
+    }
 }
 
 export async function updateReservationStatus(id: string, status: string) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro' }
-    const updateData: Record<string, unknown> = { status }
-    if (status === 'checked_in') updateData.checked_in_at = new Date().toISOString()
-    if (status === 'completed') updateData.completed_at = new Date().toISOString()
-    if (status === 'cancelled') updateData.cancelled_at = new Date().toISOString()
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
 
-    const service = createServiceClient()
-    const { error } = await service
-        .from('reservations')
-        .update(updateData)
-        .eq('id', id)
-        .eq('club_id', ctx.clubId)
+        const result = await reservationRepo.updateReservationStatus(id, context.clubId, status)
+        if (result.error) return { error: result.error }
 
-    if (error) return { error: error.message }
-    revalidatePath('/reservations')
-    revalidatePath('/admin/reservations')
-    return { error: null }
+        revalidatePath('/reservations')
+        revalidatePath('/admin/reservations')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao atualizar reserva'
+        return { error: message }
+    }
+}
+
+export async function cancelOwnReservation(id: string) {
+    try {
+        const user = await requireUser()
+
+        const result = await reservationRepo.cancelUserReservation(id, user.id)
+        if (result.error) return { error: result.error }
+
+        revalidatePath('/reservations')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao cancelar reserva'
+        return { error: message }
+    }
+}
+
+export async function rescheduleOwnReservation(id: string, newDate: string, newStartTime: string, duration: number) {
+    try {
+        const user = await requireUser()
+
+        const result = await reservationRepo.rescheduleUserReservation(id, user.id, newDate, newStartTime, duration)
+        if (result.error) return { error: result.error }
+
+        revalidatePath('/reservations')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao reagendar reserva'
+        return { error: message }
+    }
+}
+
+export async function getAvailableCourts() {
+    try {
+        await requireUser()
+        return courtRepo.getActiveCourts()
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao buscar quadras'
+        return { error: message, data: null }
+    }
+}
+
+export async function getBookedSlots(courtId: string, date: string) {
+    try {
+        return await reservationRepo.getBookedSlots(courtId, date)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao buscar horários ocupados'
+        return { error: message, data: null }
+    }
 }

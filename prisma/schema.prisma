@@ -1,0 +1,357 @@
+// Prisma schema for Padel Manager
+// Learn more at https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+/// Global user role for authentication and authorization
+enum GlobalRole {
+  ADMIN
+  STAFF
+  CLIENT
+}
+
+/// Staff role within a specific club
+enum ClubStaffRole {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+/// Court status for availability tracking
+enum CourtStatus {
+  ACTIVE
+  MAINTENANCE
+  INACTIVE
+}
+
+/// Reservation status throughout its lifecycle
+enum ReservationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+  COMPLETED
+}
+
+/// Product category for organization
+enum ProductCategory {
+  FOOD
+  BEVERAGE
+  EQUIPMENT
+  OTHER
+}
+
+/// Comanda (order/tab) status for payment tracking
+enum ComandaStatus {
+  OPEN
+  CLOSED
+  CANCELLED
+}
+
+/// Payment method used for transactions
+enum PaymentMethod {
+  CASH
+  CARD
+  TRANSFER
+  OTHER
+}
+
+/// Tournament status throughout its lifecycle
+enum TournamentStatus {
+  DRAFT
+  ACTIVE
+  COMPLETED
+  CANCELLED
+}
+
+/// Tournament registration status for participants
+enum RegistrationStatus {
+  PENDING
+  CONFIRMED
+  CANCELLED
+}
+
+// ============================================================================
+// CORE AUTH MODELS
+// ============================================================================
+
+/// User account with global authentication and role information
+model User {
+  id           String     @id @default(uuid()) @db.VarChar(36)
+  email        String     @unique
+  passwordHash String
+  globalRole   GlobalRole @default(CLIENT)
+  active       Boolean    @default(true)
+  tokenVersion Int        @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  profile      Profile?
+  sessions     Session[]
+  clubStaff    ClubStaff[]
+  reservations Reservation[]
+  tournaments  TournamentRegistration[]
+
+  @@index([email])
+  @@index([globalRole])
+}
+
+/// User profile with personal information
+model Profile {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  userId    String   @unique @db.VarChar(36)
+  name      String
+  email     String
+  phone     String?
+  cpf       String?  @unique
+  avatarUrl String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  clubStaff    ClubStaff[]
+  reservations Reservation[]
+
+  @@index([userId])
+  @@index([email])
+}
+
+/// Session for managing user authentication tokens
+model Session {
+  id               String    @id @default(uuid()) @db.VarChar(36)
+  userId           String    @db.VarChar(36)
+  refreshTokenHash String
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+  lastUsedAt       DateTime?
+  userAgent        String?
+  ipAddress        String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+// ============================================================================
+// CLUB MANAGEMENT MODELS
+// ============================================================================
+
+/// Club entity for organizing staff and courts
+model Club {
+  id          String   @id @default(uuid()) @db.VarChar(36)
+  name        String
+  description String?
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  staff       ClubStaff[]
+  courts      Court[]
+  products    Product[]
+  comandas    Comanda[]
+  tournaments Tournament[]
+
+  @@index([active])
+}
+
+/// Staff member role within a specific club
+model ClubStaff {
+  id        String        @id @default(uuid()) @db.VarChar(36)
+  profileId String        @db.VarChar(36)
+  clubId    String        @db.VarChar(36)
+  role      ClubStaffRole
+  active    Boolean       @default(true)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  club    Club    @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+  userId  String? @db.VarChar(36)
+
+  @@unique([profileId, clubId])
+  @@index([clubId])
+  @@index([active])
+}
+
+// ============================================================================
+// COURT & RESERVATION MODELS
+// ============================================================================
+
+/// Court at a club for hosting reservations
+model Court {
+  id        String      @id @default(uuid()) @db.VarChar(36)
+  clubId    String      @db.VarChar(36)
+  name      String
+  type      String
+  status    CourtStatus @default(ACTIVE)
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+
+  club         Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  reservations Reservation[]
+
+  @@index([clubId])
+  @@index([status])
+}
+
+/// Reservation of a court by a user
+model Reservation {
+  id        String            @id @default(uuid()) @db.VarChar(36)
+  courtId   String            @db.VarChar(36)
+  profileId String            @db.VarChar(36)
+  date      DateTime
+  startTime String
+  endTime   String
+  status    ReservationStatus @default(PENDING)
+  createdAt DateTime          @default(now())
+  updatedAt DateTime          @updatedAt
+
+  court   Court   @relation(fields: [courtId], references: [id], onDelete: Cascade)
+  profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  user    User?   @relation(fields: [userId], references: [id])
+  userId  String? @db.VarChar(36)
+
+  @@index([courtId])
+  @@index([profileId])
+  @@index([date])
+  @@index([status])
+}
+
+// ============================================================================
+// PRODUCTS & COMANDAS MODELS
+// ============================================================================
+
+/// Product available for purchase
+model Product {
+  id        String          @id @default(uuid()) @db.VarChar(36)
+  clubId    String          @db.VarChar(36)
+  name      String
+  category  ProductCategory
+  price     Decimal         @db.Decimal(10, 2)
+  available Boolean         @default(true)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  club         Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  comandaItems ComandaItem[]
+
+  @@index([clubId])
+  @@index([category])
+  @@index([available])
+}
+
+/// Comanda (order/tab) for tracking purchases
+model Comanda {
+  id        String        @id @default(uuid()) @db.VarChar(36)
+  clubId    String        @db.VarChar(36)
+  number    Int
+  status    ComandaStatus @default(OPEN)
+  total     Decimal       @default(0) @db.Decimal(10, 2)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  club     Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  items    ComandaItem[]
+  payments Payment[]
+
+  @@unique([clubId, number])
+  @@index([clubId])
+  @@index([status])
+}
+
+/// Item within a comanda
+model ComandaItem {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  comandaId String   @db.VarChar(36)
+  productId String   @db.VarChar(36)
+  quantity  Int
+  unitPrice Decimal  @db.Decimal(10, 2)
+  subtotal  Decimal  @db.Decimal(10, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  comanda Comanda @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+
+  @@index([comandaId])
+  @@index([productId])
+}
+
+// ============================================================================
+// PAYMENT MODELS
+// ============================================================================
+
+/// Payment transaction for a comanda
+model Payment {
+  id        String        @id @default(uuid()) @db.VarChar(36)
+  comandaId String        @db.VarChar(36)
+  method    PaymentMethod
+  amount    Decimal       @db.Decimal(10, 2)
+  paidAt    DateTime      @default(now())
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  comanda Comanda @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+
+  @@index([comandaId])
+  @@index([paidAt])
+}
+
+// ============================================================================
+// TOURNAMENT MODELS
+// ============================================================================
+
+/// Tournament event at a club
+model Tournament {
+  id              String           @id @default(uuid()) @db.VarChar(36)
+  clubId          String           @db.VarChar(36)
+  name            String
+  description     String?
+  startDate       DateTime
+  endDate         DateTime
+  maxParticipants Int
+  entryFee        Decimal?         @db.Decimal(10, 2)
+  status          TournamentStatus @default(DRAFT)
+  createdBy       String           @db.VarChar(36)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  club          Club                     @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  registrations TournamentRegistration[]
+
+  @@index([clubId])
+  @@index([status])
+  @@index([startDate])
+}
+
+/// Registration of a user in a tournament
+model TournamentRegistration {
+  id           String             @id @default(uuid()) @db.VarChar(36)
+  tournamentId String             @db.VarChar(36)
+  userId       String             @db.VarChar(36)
+  registeredAt DateTime           @default(now())
+  cancelledAt  DateTime?
+  status       RegistrationStatus @default(PENDING)
+
+  tournament Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([tournamentId, userId])
+  @@index([tournamentId])
+  @@index([userId])
+  @@index([status])
+}
