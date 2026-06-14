@@ -22,6 +22,32 @@ export interface Court {
   updated_at: string;
 }
 
+type PrismaCourt = {
+  id: string;
+  clubId: string;
+  name: string;
+  type: string;
+  pricePerSlot: { toNumber: () => number } | number;
+  durationSlot: number;
+  status: CourtStatus;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function mapCourt(court: PrismaCourt): Court {
+  return {
+    id: court.id,
+    club_id: court.clubId,
+    name: court.name,
+    court_type: court.type as Court['court_type'],
+    price_per_slot: typeof court.pricePerSlot === 'number' ? court.pricePerSlot : Number(court.pricePerSlot),
+    duration_slot: court.durationSlot,
+    active: court.status === 'ACTIVE',
+    created_at: court.createdAt.toISOString(),
+    updated_at: court.updatedAt.toISOString(),
+  };
+}
+
 /**
  * Get all active courts (public access).
  * @returns Courts list or error
@@ -33,7 +59,7 @@ export async function getActiveCourts(): Promise<{ data: Court[] | null; error: 
       orderBy: { name: 'asc' },
     });
 
-    return { data: courts as unknown as Court[], error: null };
+    return { data: courts.map(mapCourt), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar quadras';
     return { data: null, error: message };
@@ -52,7 +78,7 @@ export async function getCourtsByClub(clubId: string): Promise<{ data: Court[] |
       orderBy: { name: 'asc' },
     });
 
-    return { data: courts as unknown as Court[], error: null };
+    return { data: courts.map(mapCourt), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar quadras';
     return { data: null, error: message };
@@ -75,7 +101,7 @@ export async function getCourtById(courtId: string, clubId: string): Promise<{ d
       return { data: null, error: 'Quadra não encontrada' };
     }
 
-    return { data: court as unknown as Court, error: null };
+    return { data: mapCourt(court), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar quadra';
     return { data: null, error: message };
@@ -110,11 +136,13 @@ export async function createCourt(
         clubId,
         name: name.trim(),
         type: courtType,
-        status: 'ACTIVE' as CourtStatus,
+        pricePerSlot,
+        durationSlot,
+        status: (active ? 'ACTIVE' : 'INACTIVE') as CourtStatus,
       },
     });
 
-    return { data: court as unknown as Court, error: null };
+    return { data: mapCourt(court), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar quadra';
     return { data: null, error: message };
@@ -146,12 +174,16 @@ export async function updateCourt(
     const court = await prisma.court.update({
       where: { id: courtId },
       data: {
-        ...updates,
+        ...(updates.name !== undefined && { name: updates.name }),
+        ...(updates.court_type !== undefined && { type: updates.court_type }),
+        ...(updates.price_per_slot !== undefined && { pricePerSlot: updates.price_per_slot }),
+        ...(updates.duration_slot !== undefined && { durationSlot: updates.duration_slot }),
+        ...(updates.active !== undefined && { status: (updates.active ? 'ACTIVE' : 'INACTIVE') as CourtStatus }),
         updatedAt: new Date(),
       },
     });
 
-    return { data: court as unknown as Court, error: null };
+    return { data: mapCourt(court), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao atualizar quadra';
     return { data: null, error: message };

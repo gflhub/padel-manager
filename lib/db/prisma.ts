@@ -1,9 +1,9 @@
-'use server'
-
 import { PrismaClient } from '../generated/prisma/client'
+import { PrismaMariaDb } from '@prisma/adapter-mariadb'
 
 const prismaClientSingleton = () => {
-  return new PrismaClient({} as any)
+  const adapter = new PrismaMariaDb(process.env.DATABASE_URL ?? '')
+  return new PrismaClient({ adapter })
 }
 
 type PrismaClientSingleton = ReturnType<typeof prismaClientSingleton>

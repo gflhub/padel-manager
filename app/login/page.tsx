@@ -9,8 +9,7 @@ import { Separator } from "@/components/ui/separator"
 import { Chrome, Loader2 } from "lucide-react"
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
-import { signIn, signUp, checkUserStaffRole } from '@/app/actions/auth'
-import { getCurrentUser } from '@/lib/auth/session'
+import { signIn, signUp } from '@/app/actions/auth'
 
 export default function LoginPage() {
     const router = useRouter()
@@ -31,16 +30,14 @@ export default function LoginPage() {
             if (result.error) {
                 toast.error(result.error)
                 setLoading(false)
-            } else {
+            } else if (result.data) {
                 toast.success('Conta criada com sucesso!')
-                const user = await getCurrentUser()
-                if (user) {
-                    const staffResult = await checkUserStaffRole(user.id)
-                    if (staffResult.isStaff) {
-                        router.push('/staff/dashboard')
-                    } else {
-                        router.push('/reservations')
-                    }
+                
+                // Redireciona com base nos dados retornados da action
+                if (result.data.isStaff) {
+                    router.push('/dashboard')
+                } else {
+                    router.push('/onboarding')
                 }
                 router.refresh()
             }
@@ -53,14 +50,11 @@ export default function LoginPage() {
             } else if (result.data) {
                 toast.success('Login realizado com sucesso!')
 
-                const user = await getCurrentUser()
-                if (user) {
-                    const staffResult = await checkUserStaffRole(user.id)
-                    if (staffResult.isStaff) {
-                        router.push('/staff/dashboard')
-                    } else {
-                        router.push('/reservations')
-                    }
+                // Redireciona com base nos dados retornados da action
+                if (result.data.isStaff) {
+                    router.push('/dashboard')
+                } else {
+                    router.push('/onboarding')
                 }
                 router.refresh()
             }

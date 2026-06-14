@@ -4,6 +4,7 @@ import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import * as courtRepo from '@/lib/repositories/courts'
+import { assertClubWritable } from '@/lib/club-trial'
 
 const courtSchema = z.object({
     name: z.string().min(1, 'Nome é obrigatório'),
@@ -12,6 +13,10 @@ const courtSchema = z.object({
     duration_slot: z.coerce.number().min(30),
     active: z.boolean().optional().default(true),
 })
+
+export async function getActiveCourts() {
+    return courtRepo.getActiveCourts()
+}
 
 export async function getCourts() {
     try {
@@ -28,6 +33,7 @@ export async function createCourt(formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: formData.get('name') as string,
@@ -62,6 +68,7 @@ export async function updateCourt(id: string, formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: formData.get('name') as string,
@@ -99,6 +106,7 @@ export async function deleteCourt(id: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await courtRepo.deleteCourt(id, context.clubId)
         if (result.error) return { error: result.error }

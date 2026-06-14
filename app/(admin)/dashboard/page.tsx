@@ -1,25 +1,71 @@
+import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { DollarSign, Users, Activity, ShoppingCart } from "lucide-react"
+import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { TonalBadge, type TonalColor } from "@/components/ui/tonal-badge"
+import { SummaryBar } from "@/components/summary-bar"
+import { DollarSign, CalendarCheck, Activity, Receipt } from "lucide-react"
 import { prisma } from '@/lib/db/prisma'
 import { getClubContext } from '@/lib/get-club-role'
+import { getCurrentUser } from '@/lib/auth/session'
+import { getInitials, getAvatarColors, formatHumanDateTime } from '@/lib/format-helpers'
+import { getComandaRevenueByClub } from '@/lib/repositories/payments'
+import { getReservationRevenueByClub } from '@/lib/repositories/reservations'
 
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
 
 const statusLabels: Record<string, string> = {
     CONFIRMED: 'Confirmada', PENDING: 'Pendente', COMPLETED: 'Concluída', CANCELLED: 'Cancelada',
 }
-const statusVariant = (s: string): 'default' | 'secondary' | 'destructive' | 'outline' => {
-    if (s === 'PENDING') return 'default'
-    if (s === 'COMPLETED') return 'secondary'
-    if (s === 'CANCELLED') return 'destructive'
-    return 'outline'
+const statusTone: Record<string, TonalColor> = {
+    CONFIRMED: 'blue', PENDING: 'amber', COMPLETED: 'slate', CANCELLED: 'red',
+}
+
+type Reservation = {
+    id: string
+    status: string
+    date: Date
+    startTime: string
+    court: { name: string } | null
+    profile: { name: string | null } | null
+}
+
+const COURT_DOTS = ['bg-blue-500', 'bg-green-500', 'bg-orange-500', 'bg-violet-500']
+const courtDot = (name: string | null | undefined) => {
+    const str = name ?? '?'
+    let hash = 0
+    for (let i = 0; i < str.length; i++) hash = (hash * 31 + str.charCodeAt(i)) | 0
+    return COURT_DOTS[Math.abs(hash) % COURT_DOTS.length]
+}
+
+function ReservationRow({ r }: { r: Reservation }) {
+    const { bg, text } = getAvatarColors(r.profile?.name)
+    const tone = statusTone[r.status] ?? 'slate'
+
+    return (
+        <div className="flex items-center gap-3 px-2 py-2.5 rounded-md hover:bg-muted/70 transition-colors">
+            <Avatar className="h-9 w-9 shrink-0">
+                <AvatarFallback className={`${bg} ${text} text-xs font-semibold`}>
+                    {getInitials(r.profile?.name)}
+                </AvatarFallback>
+            </Avatar>
+            <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium leading-tight truncate">{r.profile?.name ?? 'Cliente'}</p>
+                <p className="text-xs text-muted-foreground flex items-center gap-1.5 mt-0.5">
+                    <span className={`inline-block h-1.5 w-1.5 rounded-full ${courtDot(r.court?.name)}`} />
+                    {r.court?.name ?? '—'}
+                    <span className="text-border">·</span>
+                    {formatHumanDateTime(r.date, r.startTime)}
+                </p>
+            </div>
+            <TonalBadge color={tone}>{statusLabels[r.status] ?? r.status}</TonalBadge>
+            <span className="font-semibold text-sm w-[72px] text-right text-muted-foreground">—</span>
+        </div>
+    )
 }
 
 export default async function AdminDashboard() {
-    // TODO: Get userId from session/middleware
-    const userId = null
-    const ctx = userId ? await getClubContext(userId) : null
+    const user = await getCurrentUser()
+    const ctx = user?.profileId ? await getClubContext(user.profileId) : null
     const clubId = ctx?.clubId
 
     const today = new Date()
@@ -35,7 +81,9 @@ export default async function AdminDashboard() {
         reservationsMes,
         reservationsToday,
         comandasAbertas,
-        recentes
+        recentes,
+        receitaComandasSum,
+        receitaReservasSum
     ] = await Promise.all([
         clubId ? prisma.reservation.count({
             where: {
@@ -66,16 +114,17 @@ export default async function AdminDashboard() {
             },
             orderBy: { createdAt: 'desc' },
             take: 8
-        }) : Promise.resolve([])
+        }) : Promise.resolve([]),
+        clubId ? getComandaRevenueByClub(clubId, firstOfMonth, tomorrowStart) : Promise.resolve(0),
+        clubId ? getReservationRevenueByClub(clubId, firstOfMonth, tomorrowStart) : Promise.resolve(0)
     ])
 
     const totalReservasMes = reservationsMes ?? 0
     const totalHoje = reservationsToday ?? 0
     const comandasAbertasCount = comandasAbertas ?? 0
 
-    // TODO: Calculate revenue from comandas and reservations
-    const receitaComandas = 0
-    const receitaReservas = 0
+    const receitaComandas = receitaComandasSum ?? 0
+    const receitaReservas = receitaReservasSum ?? 0
     const receitaTotal = receitaComandas + receitaReservas
 
     return (
@@ -85,75 +134,29 @@ export default async function AdminDashboard() {
                 <p className="text-muted-foreground">Visão geral do seu complexo esportivo.</p>
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 md:gap-8 lg:grid-cols-4">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Receita Total (Mês)</CardTitle>
-                        <DollarSign className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{fmt(receitaTotal)}</div>
-                        <p className="text-xs text-muted-foreground">
-                            Reservas + Comandas fechadas
-                        </p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Reservas no Mês</CardTitle>
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{totalReservasMes}</div>
-                        <p className="text-xs text-muted-foreground">Confirmadas e concluídas</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Reservas Hoje</CardTitle>
-                        <Activity className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{totalHoje}</div>
-                        <p className="text-xs text-muted-foreground">Confirmadas + check-in</p>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Comandas Abertas</CardTitle>
-                        <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{comandasAbertasCount}</div>
-                        <p className="text-xs text-muted-foreground">Aguardando fechamento</p>
-                    </CardContent>
-                </Card>
-            </div>
+            <SummaryBar
+                hero={{ label: "Receita Total (Mês)", value: fmt(receitaTotal), icon: DollarSign }}
+                items={[
+                    { label: "Reservas no Mês", value: String(totalReservasMes), icon: CalendarCheck, iconClassName: "text-primary", iconBgClassName: "bg-blue-50" },
+                    { label: "Reservas Hoje", value: String(totalHoje), icon: Activity, iconClassName: "text-violet-600", iconBgClassName: "bg-violet-50" },
+                    { label: "Comandas Abertas", value: String(comandasAbertasCount), icon: Receipt, iconClassName: "text-amber-600", iconBgClassName: "bg-amber-50" },
+                ]}
+            />
 
             <div className="grid gap-4 md:gap-8 lg:grid-cols-2 xl:grid-cols-3">
                 <Card className="xl:col-span-2">
-                    <CardHeader>
+                    <CardHeader className="flex flex-row items-center justify-between">
                         <CardTitle>Reservas Recentes</CardTitle>
+                        <Link href="/admin/reservations" className="text-xs font-medium text-primary hover:underline">
+                            Ver todas
+                        </Link>
                     </CardHeader>
                     <CardContent>
                         {recentes.length === 0 ? (
                             <p className="text-sm text-muted-foreground py-4 text-center">Nenhuma reserva encontrada.</p>
                         ) : (
-                            <div className="space-y-4">
-                                {recentes.map(r => {
-                                    return (
-                                        <div key={r.id} className="flex items-center gap-4">
-                                            <div className="flex-1 space-y-1">
-                                                <p className="text-sm font-medium leading-none">{r.profile?.name}</p>
-                                                <p className="text-sm text-muted-foreground">
-                                                    {r.court?.name ?? '—'} · {r.date.toISOString().split('T')[0]} · {r.startTime}
-                                                </p>
-                                            </div>
-                                            <Badge variant={statusVariant(r.status)}>{statusLabels[r.status] ?? r.status}</Badge>
-                                            <div className="font-medium text-sm">R$ --</div>
-                                        </div>
-                                    )
-                                })}
+                            <div className="-mx-2">
+                                {recentes.map(r => <ReservationRow key={r.id} r={r} />)}
                             </div>
                         )}
                     </CardContent>

@@ -12,6 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { createCourt, updateCourt, deleteCourt } from "@/app/actions/courts"
 import { toast } from "sonner"
 import { Plus, Pencil, Trash2 } from "lucide-react"
+import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
 interface Court {
     id: string
@@ -61,7 +62,7 @@ function CourtForm({ court, onSubmit, loading }: { court?: Court; onSubmit: (e: 
     )
 }
 
-export default function AdminCourtsPage({ courts: initialCourts }: { courts: Court[] }) {
+export default function AdminCourtsPage({ courts: initialCourts, isReadOnly = false }: { courts: Court[]; isReadOnly?: boolean }) {
     const [courts, setCourts] = useState<Court[]>(initialCourts)
     const [openCreate, setOpenCreate] = useState(false)
     const [editingCourt, setEditingCourt] = useState<Court | null>(null)
@@ -124,7 +125,7 @@ export default function AdminCourtsPage({ courts: initialCourts }: { courts: Cou
                 </div>
                 <Dialog open={openCreate} onOpenChange={setOpenCreate}>
                     <DialogTrigger asChild>
-                        <Button><Plus className="mr-2 h-4 w-4" /> Nova Quadra</Button>
+                        <Button disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Plus className="mr-2 h-4 w-4" /> Nova Quadra</Button>
                     </DialogTrigger>
                     <DialogContent>
                         <DialogHeader>
@@ -161,8 +162,8 @@ export default function AdminCourtsPage({ courts: initialCourts }: { courts: Cou
                                     <TableCell>{court.duration_slot} min</TableCell>
                                     <TableCell><Badge variant={court.active ? 'default' : 'secondary'}>{court.active ? 'Ativa' : 'Inativa'}</Badge></TableCell>
                                     <TableCell className="text-right">
-                                        <Button variant="ghost" size="icon" onClick={() => setEditingCourt(court)}><Pencil className="h-4 w-4" /></Button>
-                                        <Button variant="ghost" size="icon" onClick={() => handleDelete(court.id)}><Trash2 className="h-4 w-4 text-destructive" /></Button>
+                                        <Button variant="ghost" size="icon" onClick={() => setEditingCourt(court)} disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Pencil className="h-4 w-4" /></Button>
+                                        <Button variant="ghost" size="icon" onClick={() => handleDelete(court.id)} disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Trash2 className="h-4 w-4 text-destructive" /></Button>
                                     </TableCell>
                                 </TableRow>
                             ))}

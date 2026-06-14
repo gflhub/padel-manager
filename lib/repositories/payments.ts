@@ -1,7 +1,7 @@
 'use server';
 
-import { Decimal } from '@prisma/client/runtime/library';
-import { PaymentMethod } from '@prisma/client';
+import { Prisma } from '@/lib/generated/prisma/client';
+import { PaymentMethod } from '@/lib/generated/prisma/enums';
 import { prisma } from '@/lib/db/prisma';
 
 /**
@@ -66,8 +66,8 @@ export async function recordPayment(
     const payment = await prisma.payment.create({
       data: {
         comandaId,
-        amount: new Decimal(amount),
-        method: method.trim() as PaymentMethod,
+        amount: new Prisma.Decimal(amount),
+        method: method.trim().toUpperCase() as PaymentMethod,
         paidAt: new Date(),
       },
     });
@@ -173,6 +173,29 @@ export async function getCaixaReport(
     const message = error instanceof Error ? error.message : 'Erro ao gerar relatório de caixa';
     return { data: null, error: message };
   }
+}
+
+/**
+ * Get total revenue from paid comandas for a club within a date range.
+ * @param clubId - Club ID
+ * @param startDate - Range start (inclusive)
+ * @param endDate - Range end (exclusive)
+ * @returns Sum of payment amounts
+ */
+export async function getComandaRevenueByClub(
+  clubId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<number> {
+  const result = await prisma.payment.aggregate({
+    _sum: { amount: true },
+    where: {
+      createdAt: { gte: startDate, lt: endDate },
+      comanda: { clubId },
+    },
+  })
+
+  return result._sum.amount ? Number(result._sum.amount) : 0
 }
 
 /**

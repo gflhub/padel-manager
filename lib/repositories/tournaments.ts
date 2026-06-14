@@ -1,7 +1,9 @@
 'use server';
 
-import { Decimal } from '@prisma/client/runtime/library';
-import { TournamentStatus } from '@prisma/client';
+import { Prisma } from '@/lib/generated/prisma/client';
+import { TournamentStatus } from '@/lib/generated/prisma/enums';
+type Decimal = Prisma.Decimal;
+const Decimal = Prisma.Decimal;
 import { prisma } from '@/lib/db/prisma';
 
 /**

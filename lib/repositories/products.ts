@@ -15,10 +15,36 @@ export interface Product {
   name: string;
   category: 'bebidas' | 'lanches' | 'doces' | 'outros';
   price: number;
-  stock?: number;
+  stock: number;
   active: boolean;
   created_at: string;
   updated_at: string;
+}
+
+type PrismaProduct = {
+  id: string;
+  clubId: string;
+  name: string;
+  category: string;
+  price: { toNumber: () => number } | number;
+  stock: number;
+  available: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function mapProduct(product: PrismaProduct): Product {
+  return {
+    id: product.id,
+    club_id: product.clubId,
+    name: product.name,
+    category: product.category as Product['category'],
+    price: typeof product.price === 'number' ? product.price : Number(product.price),
+    stock: product.stock,
+    active: product.available,
+    created_at: product.createdAt.toISOString(),
+    updated_at: product.updatedAt.toISOString(),
+  };
 }
 
 /**
@@ -40,7 +66,7 @@ export async function getProductsByClub(
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
 
-    return { data: products as Product[], error: null };
+    return { data: products.map(mapProduct), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar produtos';
     return { data: null, error: message };
@@ -63,7 +89,7 @@ export async function getProductById(productId: string, clubId: string): Promise
       return { data: null, error: 'Produto não encontrado' };
     }
 
-    return { data: product as Product, error: null };
+    return { data: mapProduct(product), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar produto';
     return { data: null, error: message };
@@ -103,11 +129,12 @@ export async function createProduct(
         name: name.trim(),
         category: category as any,
         price: price,
+        stock: stock ?? 0,
         available: active,
       },
     });
 
-    return { data: product as Product, error: null };
+    return { data: mapProduct(product), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar produto';
     return { data: null, error: message };
@@ -139,12 +166,16 @@ export async function updateProduct(
     const product = await prisma.product.update({
       where: { id: productId },
       data: {
-        ...updates,
+        ...(updates.name !== undefined && { name: updates.name }),
+        ...(updates.category !== undefined && { category: updates.category }),
+        ...(updates.price !== undefined && { price: updates.price }),
+        ...(updates.stock !== undefined && { stock: updates.stock }),
+        ...(updates.active !== undefined && { available: updates.active }),
         updatedAt: new Date(),
       },
     });
 
-    return { data: product as Product, error: null };
+    return { data: mapProduct(product), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao atualizar produto';
     return { data: null, error: message };

@@ -3,6 +3,7 @@
 import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import * as comandaRepo from '@/lib/repositories/comandas'
+import { assertClubWritable } from '@/lib/club-trial'
 
 export async function getComandas(status?: string) {
     try {
@@ -30,6 +31,7 @@ export async function createComanda(formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const customer_name = (formData.get('customer_name') as string)?.trim()
         if (!customer_name) return { error: 'Nome do cliente é obrigatório' }
@@ -56,7 +58,8 @@ export async function createComanda(formData: FormData) {
 export async function addComandaItem(comandaId: string, formData: FormData) {
     try {
         const user = await requireUser()
-        await requireClubContext(user.id)
+        const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const unit_price = Number(formData.get('unit_price'))
         const quantity = Number(formData.get('quantity')) || 1
@@ -85,6 +88,7 @@ export async function closeComanda(id: string, paymentMethod: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         if (!paymentMethod || paymentMethod.trim() === '') {
             return { error: 'Método de pagamento é obrigatório' }

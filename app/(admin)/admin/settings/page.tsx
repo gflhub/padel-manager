@@ -1,39 +1,25 @@
-import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
-import { Separator } from "@/components/ui/separator"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { revalidatePath } from 'next/cache'
+import { getSettings, updateComplexInfo, updateReservationSettings, updatePaymentSettings } from "@/app/actions/settings"
 
 export default async function AdminSettingsPage() {
-    const supabase = await createClient()
-    const { data: settings } = await supabase.from('settings').select('*').single()
+    const { data: settings } = await getSettings()
 
-    const complexInfo = settings?.complex_info || { name: '', address: '', phone: '', email: '' }
-    const reservationSettings = settings?.reservation_settings || { max_advance_days: 30, default_slot_duration: 90 }
-    const paymentSettings = settings?.payment_settings || { allow_pay_later: true, allow_credits: true, pix_key: '' }
-
-    async function updateSettings(formData: FormData) {
-        'use server'
-        const supabase = await createClient()
-        const { data: { user } } = await supabase.auth.getUser()
-        if (!user) return
-
-        const complex_info = {
-            name: formData.get('complex_name') as string,
-            address: formData.get('address') as string,
-            phone: formData.get('phone') as string,
-            email: formData.get('email') as string,
-        }
-
-        await supabase
-            .from('settings')
-            .update({ complex_info, updated_by: user.id })
-            .not('id', 'is', null) // updates all rows (only one)
-
-        revalidatePath('/admin/settings')
+    const complexInfo = {
+        name: settings?.complex_name ?? '',
+        address: settings?.complex_address ?? '',
+        phone: settings?.complex_phone ?? '',
+        email: settings?.complex_email ?? '',
+    }
+    const reservationSettings = {
+        max_advance_days: settings?.max_advance_days ?? 30,
+        default_slot_duration: settings?.default_slot_duration ?? 90,
+    }
+    const paymentSettings = {
+        pix_key: settings?.pix_key ?? '',
     }
 
     return (
@@ -57,7 +43,7 @@ export default async function AdminSettingsPage() {
                             <CardDescription>Dados exibidos para os clientes.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <form action={updateSettings} className="space-y-4">
+                            <form action={updateComplexInfo} className="space-y-4">
                                 <div className="grid gap-4 md:grid-cols-2">
                                     <div className="space-y-2"><Label>Nome</Label><Input name="complex_name" defaultValue={complexInfo.name} /></div>
                                     <div className="space-y-2"><Label>Email</Label><Input name="email" type="email" defaultValue={complexInfo.email} /></div>
@@ -77,11 +63,19 @@ export default async function AdminSettingsPage() {
                             <CardDescription>Regras e políticas de agendamento.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2"><Label>Antecedência máxima (dias)</Label><Input value={reservationSettings.max_advance_days} readOnly /></div>
-                                <div className="space-y-2"><Label>Duração padrão (min)</Label><Input value={reservationSettings.default_slot_duration} readOnly /></div>
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-4">Edição avançada em breve.</p>
+                            <form action={updateReservationSettings} className="space-y-4">
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label>Antecedência máxima (dias)</Label>
+                                        <Input name="max_advance_days" type="number" min={1} max={365} defaultValue={reservationSettings.max_advance_days} />
+                                    </div>
+                                    <div className="space-y-2">
+                                        <Label>Duração padrão (min)</Label>
+                                        <Input name="default_slot_duration" type="number" min={15} max={480} defaultValue={reservationSettings.default_slot_duration} />
+                                    </div>
+                                </div>
+                                <Button type="submit">Salvar</Button>
+                            </form>
                         </CardContent>
                     </Card>
                 </TabsContent>
@@ -93,10 +87,15 @@ export default async function AdminSettingsPage() {
                             <CardDescription>Configurações de pagamento.</CardDescription>
                         </CardHeader>
                         <CardContent>
-                            <div className="grid gap-4 md:grid-cols-2">
-                                <div className="space-y-2"><Label>Chave PIX</Label><Input value={paymentSettings.pix_key || ''} readOnly /></div>
-                            </div>
-                            <p className="text-sm text-muted-foreground mt-4">Configuração de pagamentos em breve.</p>
+                            <form action={updatePaymentSettings} className="space-y-4">
+                                <div className="grid gap-4 md:grid-cols-2">
+                                    <div className="space-y-2">
+                                        <Label>Chave PIX</Label>
+                                        <Input name="pix_key" defaultValue={paymentSettings.pix_key} placeholder="email@exemplo.com, CPF/CNPJ ou chave aleatória" />
+                                    </div>
+                                </div>
+                                <Button type="submit">Salvar</Button>
+                            </form>
                         </CardContent>
                     </Card>
                 </TabsContent>

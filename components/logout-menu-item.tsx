@@ -3,14 +3,18 @@
 import { DropdownMenuItem } from '@/components/ui/dropdown-menu'
 import { LogOut } from 'lucide-react'
 import { signOut } from '@/app/actions/auth'
+import { useRouter } from 'next/navigation'
 import { useTransition } from 'react'
 
 export function LogoutMenuItem() {
     const [isPending, startTransition] = useTransition()
+    const router = useRouter()
 
     const handleLogout = () => {
         startTransition(async () => {
             await signOut()
+            router.push('/login')
+            router.refresh()
         })
     }
 

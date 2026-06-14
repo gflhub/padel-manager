@@ -4,39 +4,62 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { LayoutDashboard, Calendar, Users, Settings, Trophy, Receipt, ShoppingBag, Home, User, UserRound } from 'lucide-react'
+import { LayoutDashboard, Calendar, Users, Settings, Trophy, Receipt, ShoppingBag, Home, User, UserRound, Building2 } from 'lucide-react'
 import { cn } from '@/lib/utils'
-import { signOut } from '@/app/actions/auth'
 import { LogoutMenuItem } from '@/components/logout-menu-item'
+import { TrialBanner } from '@/components/trial-banner'
+import { getClubTrialStatus, sendTrialWarningEmailIfNeeded } from '@/lib/club-trial'
+import { sendSubscriptionDueWarnings } from '@/lib/subscription-notifications'
+import { getCurrentUser } from '@/lib/auth/session'
+import { requireStaffRole, requireGlobalAdmin } from '@/lib/auth/authorization'
 
 export default async function AdminLayout({
     children,
 }: {
     children: React.ReactNode
 }) {
-    // TODO: Get userId from session/middleware
-    const userId = null
-    if (!userId) {
+    const user = await getCurrentUser()
+    if (!user || !user.profileId) {
         redirect('/login')
     }
 
     const staff = await prisma.clubStaff.findFirst({
         where: {
-            profileId: userId,
+            profileId: user.profileId,
             active: true
         },
         include: {
-            club: { select: { name: true } }
+            club: {
+                select: {
+                    id: true,
+                    name: true,
+                    trialEndsAt: true,
+                    trialWarningEmailSentAt: true,
+                }
+            }
         },
         orderBy: { createdAt: 'asc' }
     })
 
     if (!staff) {
+        redirect('/onboarding')
+    }
+
+    const isStaff = await requireStaffRole(user.profileId, ['OWNER', 'MANAGER', 'STAFF'])
+    if (!isStaff) {
         redirect('/')
     }
 
+    const trial = getClubTrialStatus(staff.club)
+
+    if (trial.status === 'warning') {
+        await sendTrialWarningEmailIfNeeded(staff.club)
+    }
+
+    await sendSubscriptionDueWarnings(staff.club.id)
+
     const profile = await prisma.profile.findUnique({
-        where: { id: userId },
+        where: { id: user.profileId },
         select: { name: true, email: true }
     })
 
@@ -49,6 +72,8 @@ export default async function AdminLayout({
     const displayName = userData?.name || 'Admin'
     const initials = displayName.split(' ').map((n: string) => n[0]).join('').toUpperCase().slice(0, 2)
 
+    const isGlobalAdmin = await requireGlobalAdmin(user.id)
+
     const sidebarItems = [
         { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
         { icon: Calendar, label: 'Reservas', href: '/admin/reservations' },
@@ -56,7 +81,9 @@ export default async function AdminLayout({
         { icon: Trophy, label: 'Quadras', href: '/admin/courts' },
         { icon: ShoppingBag, label: 'Produtos', href: '/admin/products' },
         { icon: UserRound, label: 'Clientes', href: '/admin/customers' },
+        { icon: Users, label: 'Mensalistas', href: '/admin/members' },
         { icon: Settings, label: 'Configurações', href: '/admin/settings' },
+        ...(isGlobalAdmin ? [{ icon: Building2, label: 'Clubes', href: '/admin/clubs' }] : []),
     ]
 
     return (
@@ -178,6 +205,8 @@ export default async function AdminLayout({
                         </DropdownMenuContent>
                     </DropdownMenu>
                 </header>
+
+                <TrialBanner status={trial.status} daysRemaining={trial.daysRemaining} />
 
                 {/* Page Content */}
                 <main className="flex-1 p-6 lg:p-8">

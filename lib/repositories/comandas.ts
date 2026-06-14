@@ -1,6 +1,7 @@
 'use server';
 
 import { prisma } from '@/lib/db/prisma';
+import { PaymentMethod } from '@/lib/generated/prisma/enums';
 
 /**
  * Comanda Repository
@@ -12,33 +13,24 @@ import { prisma } from '@/lib/db/prisma';
 export interface Comanda {
   id: string;
   customer_name: string;
-  club_id: string;
   status: 'open' | 'closed' | 'cancelled';
-  total: number;
-  notes?: string;
-  opened_by: string;
+  items_count: number;
+  total_amount: number;
   opened_at: string;
-  closed_by?: string;
-  closed_at?: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export interface ComandaItem {
   id: string;
-  comanda_id: string;
-  product_id?: string;
-  name: string;
-  quantity: number;
+  item_type: string;
+  product_details: { product_id?: string; product_name: string } | null;
   unit_price: number;
+  quantity: number;
+  subtotal: number;
   total_price: number;
-  created_at: string;
 }
 
 export interface ComandaWithItems extends Comanda {
   items: ComandaItem[];
-  items_count: number;
-  total_amount: number;
 }
 
 /**
@@ -63,13 +55,16 @@ export async function getComandasByClub(
       orderBy: { createdAt: 'desc' },
     });
 
-    const normalized = comandas.map((c) => ({
-      ...c,
+    const normalized: Comanda[] = comandas.map((c) => ({
+      id: c.id,
+      customer_name: c.customerName ?? '',
+      status: c.status.toLowerCase() as Comanda['status'],
       items_count: c.items.length,
       total_amount: Number(c.total),
+      opened_at: c.createdAt.toISOString(),
     }));
 
-    return { data: normalized as Comanda[], error: null };
+    return { data: normalized, error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar comandas';
     return { data: null, error: message };
@@ -91,6 +86,7 @@ export async function getComandaWithItems(
       where: { id: comandaId },
       include: {
         items: {
+          include: { product: { select: { name: true } } },
           orderBy: { createdAt: 'asc' },
         },
       },
@@ -101,10 +97,24 @@ export async function getComandaWithItems(
     }
 
     const result: ComandaWithItems = {
-      ...comanda,
-      total_amount: Number(comanda.total),
-      items: comanda.items as any,
+      id: comanda.id,
+      customer_name: comanda.customerName ?? '',
+      status: comanda.status.toLowerCase() as Comanda['status'],
       items_count: comanda.items.length,
+      total_amount: Number(comanda.total),
+      opened_at: comanda.createdAt.toISOString(),
+      items: comanda.items.map((item) => ({
+        id: item.id,
+        item_type: 'product',
+        product_details: {
+          product_id: item.productId ?? undefined,
+          product_name: item.product?.name ?? item.name ?? '',
+        },
+        unit_price: Number(item.unitPrice),
+        quantity: item.quantity,
+        subtotal: Number(item.subtotal),
+        total_price: Number(item.subtotal),
+      })),
     };
 
     return { data: result, error: null };
@@ -145,11 +155,22 @@ export async function createComanda(
       data: {
         clubId,
         number: nextNumber,
+        customerName: customerName.trim(),
         total: 0,
       },
     });
 
-    return { data: comanda as Comanda, error: null };
+    return {
+      data: {
+        id: comanda.id,
+        customer_name: comanda.customerName ?? '',
+        status: comanda.status.toLowerCase() as Comanda['status'],
+        items_count: 0,
+        total_amount: Number(comanda.total),
+        opened_at: comanda.createdAt.toISOString(),
+      },
+      error: null,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar comanda';
     return { data: null, error: message };
@@ -179,10 +200,12 @@ export async function addComandaItem(
       data: {
         comandaId,
         productId: productId || undefined,
+        name: productId ? undefined : name,
         quantity,
         unitPrice,
         subtotal,
       },
+      include: { product: { select: { name: true } } },
     });
 
     // Recalculate comanda total
@@ -197,7 +220,21 @@ export async function addComandaItem(
       data: { total: newTotal },
     });
 
-    return { data: item as ComandaItem, error: null };
+    return {
+      data: {
+        id: item.id,
+        item_type: 'product',
+        product_details: {
+          product_id: item.productId ?? undefined,
+          product_name: item.product?.name ?? item.name ?? '',
+        },
+        unit_price: Number(item.unitPrice),
+        quantity: item.quantity,
+        subtotal: Number(item.subtotal),
+        total_price: Number(item.subtotal),
+      },
+      error: null,
+    };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao adicionar item à comanda';
     return { data: null, error: message };
@@ -280,7 +317,7 @@ export async function closeComanda(
       prisma.payment.create({
         data: {
           comandaId: comandaId,
-          method: paymentMethod.trim() as any,
+          method: paymentMethod.trim().toUpperCase() as PaymentMethod,
           amount: comanda.total,
           paidAt: new Date(),
         },

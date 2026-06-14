@@ -5,11 +5,13 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Input } from "@/components/ui/input"
-import { Plus, LayoutGrid, Table } from "lucide-react"
+import { Plus, LayoutGrid, Table, Wallet, Receipt, TrendingUp, Beer } from "lucide-react"
 import { createComanda } from "@/app/actions/comandas"
 import { toast } from "sonner"
 import ComandasCards from "./comandas-cards"
 import AdminComandasClient from "./comandas-client"
+import { SummaryBar } from "@/components/summary-bar"
+import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
 interface Comanda {
     id: string
@@ -20,6 +22,15 @@ interface Comanda {
     opened_at: string
 }
 
+const formatCurrency = (value: number) =>
+    new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL', maximumFractionDigits: 0 }).format(value)
+
+const isToday = (iso: string) => {
+    const d = new Date(iso)
+    const now = new Date()
+    return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() === now.getDate()
+}
+
 interface Product {
     id: string
     name: string
@@ -27,16 +38,26 @@ interface Product {
     price: number
 }
 
-export default function ComandasWrapper({ comandas: initialComandas, products }: { comandas: Comanda[]; products: Product[] }) {
+export default function ComandasWrapper({ comandas: initialComandas, products, isReadOnly = false }: { comandas: Comanda[]; products: Product[]; isReadOnly?: boolean }) {
     const [comandas, setComandas] = useState(initialComandas)
     const [openCreate, setOpenCreate] = useState(false)
     const [loading, setLoading] = useState(false)
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
 
+    const openComandas = comandas.filter(c => c.status === 'open')
+    const closedComandas = comandas.filter(c => c.status === 'closed')
+    const totalOpen = openComandas.reduce((sum, c) => sum + c.total_amount, 0)
+    const closedToday = closedComandas.filter(c => isToday(c.opened_at))
+    const ticketMedio = closedComandas.length > 0
+        ? closedComandas.reduce((sum, c) => sum + c.total_amount, 0) / closedComandas.length
+        : 0
+    const itensVendidosHoje = closedToday.reduce((sum, c) => sum + c.items_count, 0)
+
     const handleCreate = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
+        const form = e.currentTarget
         setLoading(true)
-        const formData = new FormData(e.currentTarget)
+        const formData = new FormData(form)
         const result = await createComanda(formData)
         if (result.error) {
             toast.error(result.error)
@@ -44,8 +65,7 @@ export default function ComandasWrapper({ comandas: initialComandas, products }:
             toast.success('Comanda aberta!')
             setOpenCreate(false)
             if (result.data) setComandas(prev => [result.data as Comanda, ...prev])
-            // Reset form
-            e.currentTarget.reset()
+            form.reset()
         }
         setLoading(false)
     }
@@ -78,7 +98,7 @@ export default function ComandasWrapper({ comandas: initialComandas, products }:
                     </div>
                     <Dialog open={openCreate} onOpenChange={setOpenCreate}>
                         <DialogTrigger asChild>
-                            <Button>
+                            <Button disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}>
                                 <Plus className="mr-2 h-4 w-4" />
                                 Nova Comanda
                             </Button>
@@ -112,10 +132,43 @@ export default function ComandasWrapper({ comandas: initialComandas, products }:
                 </div>
             </div>
 
+            <SummaryBar
+                hero={{
+                    label: "Total em Aberto",
+                    value: formatCurrency(totalOpen),
+                    suffix: `${openComandas.length} ativas`,
+                    icon: Wallet,
+                }}
+                items={[
+                    {
+                        label: "Abertas",
+                        value: String(openComandas.length),
+                        icon: Receipt,
+                        iconClassName: "text-emerald-600",
+                        iconBgClassName: "bg-emerald-50",
+                    },
+                    {
+                        label: "Ticket Médio",
+                        value: closedComandas.length > 0 ? formatCurrency(ticketMedio) : "—",
+                        suffix: closedComandas.length > 0 ? `${closedComandas.length} fechadas` : undefined,
+                        icon: TrendingUp,
+                        iconClassName: "text-violet-600",
+                        iconBgClassName: "bg-violet-50",
+                    },
+                    {
+                        label: "Itens Vendidos Hoje",
+                        value: String(itensVendidosHoje),
+                        icon: Beer,
+                        iconClassName: "text-amber-600",
+                        iconBgClassName: "bg-amber-50",
+                    },
+                ]}
+            />
+
             {viewMode === 'cards' ? (
-                <ComandasCards comandas={comandas} products={products} />
+                <ComandasCards comandas={comandas} products={products} isReadOnly={isReadOnly} />
             ) : (
-                <AdminComandasClient comandas={comandas} products={products} />
+                <AdminComandasClient comandas={comandas} products={products} isReadOnly={isReadOnly} />
             )}
         </div>
     )

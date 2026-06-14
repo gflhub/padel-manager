@@ -1,6 +1,6 @@
 'use server'
 
-import { createClient } from '@/lib/supabase/server'
+import { prisma } from '@/lib/db/prisma'
 
 /**
  * Check if user has one of the allowed staff roles at their club.
@@ -11,35 +11,19 @@ export async function requireStaffRole(
   allowedRoles: string[]
 ): Promise<boolean> {
   try {
-    const supabase = createClient()
+    const clubStaff = await prisma.clubStaff.findFirst({
+      where: { profileId: userId, active: true },
+      select: { role: true },
+      orderBy: { createdAt: 'asc' },
+    })
 
-    // Get profile ID from user
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', userId)
-      .single()
-
-    if (profileError || !profile) {
-      return false
-    }
-
-    // Check if user has staff role at their club and if it's in the allowed list
-    const { data: clubStaff, error: staffError } = await supabase
-      .from('club_staff')
-      .select('role')
-      .eq('profile_id', profile.id)
-      .eq('active', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single()
-
-    if (staffError || !clubStaff) {
+    if (!clubStaff) {
       return false
     }
 
     return allowedRoles.includes(clubStaff.role)
-  } catch {
+  } catch (error) {
+    console.error('[authorization] role check failed:', error)
     return false
   }
 }
@@ -53,43 +37,44 @@ export async function canManageClubResource(
   clubId: string
 ): Promise<boolean> {
   try {
-    const supabase = createClient()
+    const clubStaff = await prisma.clubStaff.findFirst({
+      where: { profileId: userId, clubId, active: true },
+      select: { role: true },
+    })
 
-    // Get profile ID from user
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', userId)
-      .single()
-
-    if (profileError || !profile) {
+    if (!clubStaff) {
       return false
     }
 
-    // Check if user is an active staff member of the specified club
-    const { data: clubStaff, error: staffError } = await supabase
-      .from('club_staff')
-      .select('role')
-      .eq('profile_id', profile.id)
-      .eq('club_id', clubId)
-      .eq('active', true)
-      .single()
-
-    if (staffError || !clubStaff) {
-      return false
-    }
-
-    // Staff members with 'manager' or 'owner' roles can manage club resources
-    const managerRoles = ['manager', 'owner', 'admin']
+    const managerRoles = ['MANAGER', 'OWNER']
     return managerRoles.includes(clubStaff.role)
-  } catch {
+  } catch (error) {
+    console.error('[authorization] role check failed:', error)
+    return false
+  }
+}
+
+/**
+ * Check if a user has the global ADMIN role (platform administrator).
+ * @param userId - User.id (global account id, not Profile.id)
+ */
+export async function requireGlobalAdmin(userId: string): Promise<boolean> {
+  try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { globalRole: true },
+    })
+
+    return user?.globalRole === 'ADMIN'
+  } catch (error) {
+    console.error('[authorization] role check failed:', error)
     return false
   }
 }
 
 /**
  * Check if user can manage another user.
- * Only admin users or club owners can manage other users.
+ * Only global admins or club owners (within the same club) can manage other users.
  * Returns true if authorized, false otherwise.
  */
 export async function canManageUser(
@@ -97,74 +82,38 @@ export async function canManageUser(
   targetUserId: string
 ): Promise<boolean> {
   try {
-    const supabase = createClient()
+    const adminUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { globalRole: true },
+    })
 
-    // Check if user is a global admin
-    const { data: adminUser, error: adminError } = await supabase
-      .from('users')
-      .select('role')
-      .eq('id', userId)
-      .single()
-
-    if (!adminError && adminUser && adminUser.role === 'admin') {
+    if (adminUser?.globalRole === 'ADMIN') {
       return true
     }
 
-    // If not a global admin, check if user is a club owner who can manage the target user
-    const { data: profile, error: profileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', userId)
-      .single()
+    const userStaff = await prisma.clubStaff.findFirst({
+      where: { profileId: userId, active: true },
+      select: { clubId: true, role: true },
+      orderBy: { createdAt: 'asc' },
+    })
 
-    if (profileError || !profile) {
+    if (!userStaff) {
       return false
     }
 
-    // Get the target user's profile
-    const { data: targetProfile, error: targetProfileError } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', targetUserId)
-      .single()
+    const targetStaff = await prisma.clubStaff.findFirst({
+      where: { profileId: targetUserId, active: true },
+      select: { clubId: true },
+      orderBy: { createdAt: 'asc' },
+    })
 
-    if (targetProfileError || !targetProfile) {
+    if (!targetStaff) {
       return false
     }
 
-    // Check if both users are in the same club and the current user is an owner
-    const { data: userStaff, error: userStaffError } = await supabase
-      .from('club_staff')
-      .select('club_id, role')
-      .eq('profile_id', profile.id)
-      .eq('active', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single()
-
-    if (userStaffError || !userStaff) {
-      return false
-    }
-
-    const { data: targetStaff, error: targetStaffError } = await supabase
-      .from('club_staff')
-      .select('club_id, role')
-      .eq('profile_id', targetProfile.id)
-      .eq('active', true)
-      .order('created_at', { ascending: true })
-      .limit(1)
-      .single()
-
-    if (targetStaffError || !targetStaff) {
-      return false
-    }
-
-    // User can manage target if they're in the same club and have owner role
-    return (
-      userStaff.club_id === targetStaff.club_id &&
-      userStaff.role === 'owner'
-    )
-  } catch {
+    return userStaff.clubId === targetStaff.clubId && userStaff.role === 'OWNER'
+  } catch (error) {
+    console.error('[authorization] role check failed:', error)
     return false
   }
 }

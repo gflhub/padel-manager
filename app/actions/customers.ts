@@ -1,6 +1,7 @@
 'use server'
 
 import { requireUser, requireClubContext } from '@/lib/auth/session'
+import { assertClubWritable } from '@/lib/club-trial'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import * as userRepo from '@/lib/repositories/users'
@@ -28,6 +29,7 @@ export async function createCustomer(formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: (formData.get('name') as string)?.trim(),
@@ -69,6 +71,7 @@ export async function updateCustomer(id: string, formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: (formData.get('name') as string)?.trim(),
@@ -93,6 +96,7 @@ export async function toggleCustomerActive(id: string, active: boolean) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await userRepo.toggleClubMemberActive(id, context.clubId, active)
         if (result.error) return { error: result.error }

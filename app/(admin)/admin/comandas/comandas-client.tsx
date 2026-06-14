@@ -12,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { createComanda, addComandaItem, closeComanda, getComandaWithItems, closeMultipleComandas } from "@/app/actions/comandas"
 import { toast } from "sonner"
-import { Plus, Eye, CreditCard, CheckSquare, Square } from "lucide-react"
+import { Plus, Eye, CreditCard } from "lucide-react"
+import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
 interface Comanda {
     id: string
@@ -36,7 +37,7 @@ interface Product {
     price: number
 }
 
-export default function AdminComandasClient({ comandas: initialComandas, products }: { comandas: Comanda[]; products: Product[] }) {
+export default function AdminComandasClient({ comandas: initialComandas, products, isReadOnly = false }: { comandas: Comanda[]; products: Product[]; isReadOnly?: boolean }) {
     const [comandas, setComandas] = useState(initialComandas)
     const [openCreate, setOpenCreate] = useState(false)
     const [viewingComanda, setViewingComanda] = useState<Comanda | null>(null)
@@ -152,25 +153,18 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                     <h1 className="text-3xl font-bold tracking-tight">Comandas</h1>
                     <p className="text-muted-foreground">Gerencie comandas dos clientes.</p>
                 </div>
-                <div className="flex gap-2">
-                    {selectedIds.length > 0 && (
-                        <Button variant="outline" onClick={() => setOpenCloseMultiple(true)} className="border-primary text-primary hover:bg-primary/10">
-                            <CreditCard className="mr-2 h-4 w-4" /> Fechar Selecionadas ({selectedIds.length})
-                        </Button>
-                    )}
-                    <Dialog open={openCreate} onOpenChange={setOpenCreate}>
-                        <DialogTrigger asChild><Button><Plus className="mr-2 h-4 w-4" /> Nova Comanda</Button></DialogTrigger>
-                        <DialogContent>
-                            <DialogHeader><DialogTitle>Abrir Comanda</DialogTitle><DialogDescription>Dados do cliente.</DialogDescription></DialogHeader>
-                            <form onSubmit={handleCreate} className="space-y-4">
-                                <div className="space-y-2"><Label htmlFor="customer_name">Nome do Cliente</Label><Input id="customer_name" name="customer_name" required /></div>
-                                <div className="space-y-2"><Label htmlFor="customer_phone">Telefone</Label><Input id="customer_phone" name="customer_phone" /></div>
-                                <div className="space-y-2"><Label htmlFor="customer_cpf">CPF</Label><Input id="customer_cpf" name="customer_cpf" /></div>
-                                <DialogFooter><Button type="submit" disabled={loading}>{loading ? 'Abrindo...' : 'Abrir Comanda'}</Button></DialogFooter>
-                            </form>
-                        </DialogContent>
-                    </Dialog>
-                </div>
+                <Dialog open={openCreate} onOpenChange={setOpenCreate}>
+                    <DialogTrigger asChild><Button disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Plus className="mr-2 h-4 w-4" /> Nova Comanda</Button></DialogTrigger>
+                    <DialogContent>
+                        <DialogHeader><DialogTitle>Abrir Comanda</DialogTitle><DialogDescription>Dados do cliente.</DialogDescription></DialogHeader>
+                        <form onSubmit={handleCreate} className="space-y-4">
+                            <div className="space-y-2"><Label htmlFor="customer_name">Nome do Cliente</Label><Input id="customer_name" name="customer_name" required /></div>
+                            <div className="space-y-2"><Label htmlFor="customer_phone">Telefone</Label><Input id="customer_phone" name="customer_phone" /></div>
+                            <div className="space-y-2"><Label htmlFor="customer_cpf">CPF</Label><Input id="customer_cpf" name="customer_cpf" /></div>
+                            <DialogFooter><Button type="submit" disabled={loading}>{loading ? 'Abrindo...' : 'Abrir Comanda'}</Button></DialogFooter>
+                        </form>
+                    </DialogContent>
+                </Dialog>
             </div>
 
             <Tabs defaultValue="open">
@@ -264,8 +258,8 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                             </Table>
                             {viewingComanda.status === 'open' && (
                                 <div className="flex gap-2 justify-end">
-                                    <Button variant="outline" onClick={() => setOpenAddProduct(true)}><Plus className="mr-2 h-4 w-4" />Adicionar Produto</Button>
-                                    <Button onClick={() => setOpenClose(true)}><CreditCard className="mr-2 h-4 w-4" />Fechar Comanda</Button>
+                                    <Button variant="outline" onClick={() => setOpenAddProduct(true)} disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Plus className="mr-2 h-4 w-4" />Adicionar Produto</Button>
+                                    <Button onClick={() => setOpenClose(true)} disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><CreditCard className="mr-2 h-4 w-4" />Fechar Comanda</Button>
                                 </div>
                             )}
                         </div>

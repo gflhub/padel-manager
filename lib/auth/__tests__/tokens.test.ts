@@ -1,4 +1,13 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
+
+vi.mock('@/lib/db/prisma', () => ({
+  prisma: {
+    user: {
+      findUnique: () => Promise.resolve({ tokenVersion: 0 }),
+    },
+  },
+}))
+
 import {
   signAccessToken,
   verifyAccessToken,

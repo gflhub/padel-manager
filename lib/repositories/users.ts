@@ -1,6 +1,8 @@
 'use server';
 
 import { prisma } from '@/lib/db/prisma';
+import { randomUUID } from 'crypto';
+import * as bcrypt from 'bcrypt';
 
 /**
  * User Repository
@@ -11,11 +13,11 @@ import { prisma } from '@/lib/db/prisma';
 
 export interface UserProfile {
   id: string;
-  email?: string;
-  name?: string;
-  phone?: string;
-  cpf?: string;
-  avatar_url?: string;
+  email: string;
+  name: string;
+  phone: string | null;
+  cpf: string | null;
+  avatar_url: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -23,18 +25,80 @@ export interface UserProfile {
 export interface ClubMember {
   id: string;
   club_id: string;
-  profile_id?: string;
+  profile_id: string | null;
   name: string;
-  email?: string;
-  phone?: string;
-  cpf?: string;
-  notes?: string;
+  email: string | null;
+  phone: string | null;
+  cpf: string | null;
+  notes: string | null;
   active: boolean;
   joined_at: string;
 }
 
 export interface ClubMemberWithProfile extends ClubMember {
   profile?: UserProfile;
+}
+
+type PrismaProfile = {
+  id: string;
+  email: string;
+  name: string;
+  phone: string | null;
+  cpf: string | null;
+  avatarUrl: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+};
+
+function mapProfile(profile: PrismaProfile): UserProfile {
+  return {
+    id: profile.id,
+    email: profile.email,
+    name: profile.name,
+    phone: profile.phone,
+    cpf: profile.cpf,
+    avatar_url: profile.avatarUrl,
+    created_at: profile.createdAt.toISOString(),
+    updated_at: profile.updatedAt.toISOString(),
+  };
+}
+
+export interface AdminUserListItem {
+  id: string;
+  name: string;
+  email: string;
+  phone: string | null;
+  role: string;
+  active: boolean;
+  created_at: string;
+}
+
+/**
+ * Get all users for the global admin user list.
+ * @returns Users list or error
+ */
+export async function getAllUsers(): Promise<{ data: AdminUserListItem[] | null; error: string | null }> {
+  try {
+    const users = await prisma.user.findMany({
+      include: { profile: true },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    const items: AdminUserListItem[] = users.map((user) => ({
+      id: user.id,
+      name: user.profile?.name ?? '',
+      email: user.email,
+      phone: user.profile?.phone ?? null,
+      role: user.globalRole.toLowerCase(),
+      active: user.active,
+      created_at: user.createdAt.toISOString(),
+    }));
+
+    return { data: items, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao buscar usuários';
+    return { data: null, error: message };
+  }
 }
 
 /**
@@ -49,7 +113,7 @@ export async function getUserProfile(userId: string): Promise<{ data: UserProfil
     });
 
     if (!profile) return { data: null, error: 'Perfil de usuário não encontrado' };
-    return { data: profile as UserProfile, error: null };
+    return { data: mapProfile(profile), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar perfil';
     return { data: null, error: message };
@@ -70,12 +134,16 @@ export async function updateUserProfile(
     const profile = await prisma.profile.update({
       where: { id: userId },
       data: {
-        ...updates,
+        ...(updates.name !== undefined && { name: updates.name }),
+        ...(updates.email !== undefined && { email: updates.email }),
+        ...(updates.phone !== undefined && { phone: updates.phone }),
+        ...(updates.cpf !== undefined && { cpf: updates.cpf }),
+        ...(updates.avatar_url !== undefined && { avatarUrl: updates.avatar_url }),
         updatedAt: new Date(),
       },
     });
 
-    return { data: profile as UserProfile, error: null };
+    return { data: mapProfile(profile), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao atualizar perfil';
     return { data: null, error: message };
@@ -103,7 +171,7 @@ export async function getClubMembers(clubId: string): Promise<{ data: ClubMember
       email: staff.profile.email,
       phone: staff.profile.phone,
       cpf: staff.profile.cpf,
-      notes: undefined,
+      notes: null,
       active: staff.active,
       joined_at: staff.createdAt.toISOString(),
       profile: {
@@ -112,7 +180,7 @@ export async function getClubMembers(clubId: string): Promise<{ data: ClubMember
         name: staff.profile.name,
         phone: staff.profile.phone,
         cpf: staff.profile.cpf,
-        avatar_url: staff.profile.avatarUrl || undefined,
+        avatar_url: staff.profile.avatarUrl,
         created_at: staff.profile.createdAt.toISOString(),
         updated_at: staff.profile.updatedAt.toISOString(),
       },
@@ -153,7 +221,7 @@ export async function getClubMemberById(
       email: staff.profile.email,
       phone: staff.profile.phone,
       cpf: staff.profile.cpf,
-      notes: undefined,
+      notes: null,
       active: staff.active,
       joined_at: staff.createdAt.toISOString(),
     };
@@ -190,16 +258,37 @@ export async function createClubMember(
       return { data: null, error: 'Nome do membro é obrigatório' };
     }
 
-    let profile = await prisma.profile.findUnique({
-      where: { email: email?.toLowerCase().trim() },
-    });
+    let profile = email
+      ? await prisma.profile.findFirst({
+          where: { email: email.toLowerCase().trim() },
+        })
+      : null;
 
-    if (!profile && email) {
+    if (!profile) {
+      let userId = profileId;
+
+      if (!userId) {
+        const placeholderEmail = email
+          ? email.toLowerCase().trim()
+          : `member-${randomUUID()}@placeholder.local`;
+        const passwordHash = await bcrypt.hash(randomUUID(), 10);
+
+        const newUser = await prisma.user.create({
+          data: {
+            email: placeholderEmail,
+            passwordHash,
+            globalRole: 'CLIENT',
+            active: false,
+          },
+        });
+        userId = newUser.id;
+      }
+
       profile = await prisma.profile.create({
         data: {
-          userId: profileId || '',
+          userId,
           name: name.trim(),
-          email: email.toLowerCase().trim(),
+          email: email ? email.toLowerCase().trim() : `${userId}@placeholder.local`,
           phone: phone || null,
           cpf: cpf?.replace(/\D/g, '') || null,
         },
@@ -224,7 +313,7 @@ export async function createClubMember(
       email: staff.profile.email,
       phone: staff.profile.phone,
       cpf: staff.profile.cpf,
-      notes: undefined,
+      notes: null,
       active: staff.active,
       joined_at: staff.createdAt.toISOString(),
     };
@@ -274,7 +363,7 @@ export async function updateClubMember(
       email: staff.profile.email,
       phone: staff.profile.phone,
       cpf: staff.profile.cpf,
-      notes: undefined,
+      notes: null,
       active: staff.active,
       joined_at: staff.createdAt.toISOString(),
     };

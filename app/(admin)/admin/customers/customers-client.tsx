@@ -12,20 +12,10 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from "@/components/ui/textarea"
 import { createCustomer, updateCustomer, toggleCustomerActive, checkCpfStatus } from "@/app/actions/customers"
 import { toast } from "sonner"
-import { Plus, Pencil, UserCheck, UserX, Search, Link as LinkIcon, Loader2, AlertCircle, Lock } from "lucide-react"
-
-// ─── Tipos ───────────────────────────────────────────────────
-// Dados de identidade vêm exclusivamente do profile (Single Source of Truth)
-// club_members armazena apenas: profile_id, notes, active, joined_at
-interface CustomerProfile {
-    id: string
-    name: string | null
-    email: string
-    phone: string | null
-    cpf: string | null
-    avatar_url: string | null
-    status: string | null
-}
+import { Plus, Search, Link as LinkIcon, Users, UserPen, UserPlus } from "lucide-react"
+import { SummaryBar } from "@/components/summary-bar"
+import { CustomerRow } from "./customer-row"
+import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
 interface Customer {
     id: string
@@ -54,27 +44,13 @@ function formatPhone(value: string) {
         .slice(0, 15)
 }
 
-function isValidCpf(cpf: string) {
-    return cpf.replace(/\D/g, '').length === 11
-}
-
-// ─── Tipos auxiliares ─────────────────────────────────────────
-type CpfCheckState = 'idle' | 'checking' | 'not-found' | 'found' | 'member'
-
-interface FoundProfile {
-    id: string
-    name: string | null
-    email: string
-    status: string | null
-}
-
-// ─── Componente principal ─────────────────────────────────────
-export default function CustomersClient({ customers: initialCustomers }: { customers: Customer[] }) {
+export default function CustomersClient({ customers: initialCustomers, isReadOnly = false }: { customers: Customer[]; isReadOnly?: boolean }) {
     const [customers, setCustomers] = useState<Customer[]>(initialCustomers)
     const [openCreate, setOpenCreate] = useState(false)
     const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null)
     const [loading, setLoading] = useState(false)
     const [search, setSearch] = useState('')
+    const [statusFilter, setStatusFilter] = useState<'all' | 'active' | 'withAccount'>('all')
 
     // ── Estado do formulário de criação ──
     const [cpfInput, setCpfInput] = useState('')
@@ -91,20 +67,33 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
     // ── Estado do formulário de edição ──
     const [editPhone, setEditPhone] = useState('')
 
-    // ── Filtro: pesquisa nos dados do profile ──
+    const metrics = useMemo(() => {
+        const total = customers.length
+        const active = customers.filter(c => c.active).length
+        const withAccount = customers.filter(c => c.profile_id).length
+        const manual = total - withAccount
+        const now = new Date()
+        const newThisMonth = customers.filter(c => {
+            const d = new Date(c.joined_at)
+            return d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth()
+        }).length
+        return { total, active, withAccount, manual, newThisMonth }
+    }, [customers])
+
     const filtered = useMemo(() => {
-        if (!search.trim()) return customers
+        let list = customers
+        if (statusFilter === 'active') list = list.filter(c => c.active)
+        else if (statusFilter === 'withAccount') list = list.filter(c => c.profile_id)
+
+        if (!search.trim()) return list
         const q = search.toLowerCase()
-        return customers.filter(c => {
-            const p = c.profile
-            return (
-                p?.name?.toLowerCase().includes(q) ||
-                p?.email?.toLowerCase().includes(q) ||
-                p?.cpf?.includes(q) ||
-                p?.phone?.includes(q)
-            )
-        })
-    }, [customers, search])
+        return list.filter(c =>
+            c.name?.toLowerCase().includes(q) ||
+            c.email?.toLowerCase().includes(q) ||
+            c.cpf?.includes(q) ||
+            c.phone?.includes(q)
+        )
+    }, [customers, search, statusFilter])
 
     // ── Fecha o dialog de criação e limpa tudo ──
     const resetCreateForm = () => {
@@ -275,7 +264,7 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                     }}
                 >
                     <DialogTrigger asChild>
-                        <Button><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
+                        <Button disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}><Plus className="mr-2 h-4 w-4" /> Novo Cliente</Button>
                     </DialogTrigger>
                     <DialogContent>
                         <DialogHeader>
@@ -418,14 +407,68 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                 </Dialog>
             </div>
 
-            {/* ── Card: lista de clientes ── */}
+            <SummaryBar
+                hero={{
+                    label: "Total de Clientes",
+                    value: String(metrics.total),
+                    suffix: `${metrics.active} ativos`,
+                    icon: Users,
+                }}
+                items={[
+                    {
+                        label: "Com Conta",
+                        value: String(metrics.withAccount),
+                        suffix: metrics.total > 0 ? `${Math.round((metrics.withAccount / metrics.total) * 100)}%` : undefined,
+                        icon: LinkIcon,
+                        iconClassName: "text-primary",
+                        iconBgClassName: "bg-blue-50",
+                    },
+                    {
+                        label: "Cadastro Manual",
+                        value: String(metrics.manual),
+                        icon: UserPen,
+                        iconClassName: "text-slate-500",
+                        iconBgClassName: "bg-slate-100",
+                    },
+                    {
+                        label: "Novos no Mês",
+                        value: String(metrics.newThisMonth),
+                        icon: UserPlus,
+                        iconClassName: "text-emerald-600",
+                        iconBgClassName: "bg-emerald-50",
+                    },
+                ]}
+            />
+
             <Card>
                 <CardHeader>
-                    <div className="flex items-center justify-between gap-4">
-                        <CardTitle>
-                            Lista de Clientes{' '}
-                            <span className="text-muted-foreground font-normal text-sm">({customers.length})</span>
-                        </CardTitle>
+                    <div className="flex items-center justify-between gap-4 flex-wrap">
+                        <div className="flex items-center gap-3">
+                            <CardTitle>Lista de Clientes</CardTitle>
+                            <div className="inline-flex items-center bg-muted rounded-lg p-1 text-xs">
+                                <button
+                                    type="button"
+                                    onClick={() => setStatusFilter('all')}
+                                    className={`px-2.5 py-1 rounded-md font-medium transition-colors ${statusFilter === 'all' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground'}`}
+                                >
+                                    Todos {metrics.total}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setStatusFilter('active')}
+                                    className={`px-2.5 py-1 rounded-md font-medium transition-colors ${statusFilter === 'active' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground'}`}
+                                >
+                                    Ativos {metrics.active}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={() => setStatusFilter('withAccount')}
+                                    className={`px-2.5 py-1 rounded-md font-medium transition-colors ${statusFilter === 'withAccount' ? 'bg-white shadow-sm text-foreground' : 'text-muted-foreground'}`}
+                                >
+                                    Com conta {metrics.withAccount}
+                                </button>
+                            </div>
+                        </div>
                         <div className="relative w-64">
                             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
                             <Input
@@ -441,79 +484,34 @@ export default function CustomersClient({ customers: initialCustomers }: { custo
                     <Table>
                         <TableHeader>
                             <TableRow>
-                                <TableHead>Nome</TableHead>
-                                <TableHead>E-mail</TableHead>
-                                <TableHead>Telefone</TableHead>
-                                <TableHead>CPF</TableHead>
+                                <TableHead>Cliente</TableHead>
+                                <TableHead>Contato</TableHead>
                                 <TableHead>Conta</TableHead>
                                 <TableHead>Status</TableHead>
-                                <TableHead>Vínculo</TableHead>
+                                <TableHead>Cliente desde</TableHead>
                                 <TableHead className="text-right">Ações</TableHead>
                             </TableRow>
                         </TableHeader>
                         <TableBody>
                             {filtered.length === 0 ? (
                                 <TableRow>
-                                    <TableCell colSpan={8} className="text-center text-muted-foreground py-10">
+                                    <TableCell colSpan={6} className="text-center text-muted-foreground py-10">
                                         {search ? 'Nenhum cliente encontrado para esta busca.' : 'Nenhum cliente vinculado.'}
                                     </TableCell>
                                 </TableRow>
-                            ) : filtered.map((customer) => {
-                                const p = customer.profile
-                                return (
-                                    <TableRow key={customer.id}>
-                                        <TableCell className="font-medium">{p?.name || '—'}</TableCell>
-                                        <TableCell className="text-sm">{p?.email || '—'}</TableCell>
-                                        <TableCell className="text-sm">{p?.phone || '—'}</TableCell>
-                                        <TableCell className="text-sm font-mono">{p?.cpf || '—'}</TableCell>
-                                        <TableCell>
-                                            {p?.status === 'pre_registered' ? (
-                                                <Badge variant="secondary" className="gap-1">
-                                                    <LinkIcon className="h-3 w-3" />
-                                                    Pré-cadastro
-                                                </Badge>
-                                            ) : (
-                                                <Badge variant="default" className="gap-1">
-                                                    <LinkIcon className="h-3 w-3" />
-                                                    Com conta
-                                                </Badge>
-                                            )}
-                                        </TableCell>
-                                        <TableCell>
-                                            <Badge variant={customer.active ? 'default' : 'outline'}>
-                                                {customer.active ? 'Ativo' : 'Inativo'}
-                                            </Badge>
-                                        </TableCell>
-                                        <TableCell className="text-sm text-muted-foreground">
-                                            {new Date(customer.joined_at).toLocaleDateString('pt-BR')}
-                                        </TableCell>
-                                        <TableCell className="text-right">
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => {
-                                                    setEditingCustomer(customer)
-                                                    setEditPhone(customer.profile?.phone || '')
-                                                }}
-                                                title="Editar vínculo"
-                                            >
-                                                <Pencil className="h-4 w-4" />
-                                            </Button>
-                                            <Button
-                                                variant="ghost"
-                                                size="icon"
-                                                onClick={() => handleToggleActive(customer)}
-                                                title={customer.active ? 'Inativar cliente' : 'Ativar cliente'}
-                                            >
-                                                {customer.active
-                                                    ? <UserX className="h-4 w-4 text-destructive" />
-                                                    : <UserCheck className="h-4 w-4 text-green-600" />
-                                                }
-                                            </Button>
-                                        </TableCell>
-                                    </TableRow>
-                                )
-                            })}
+                            ) : filtered.map((customer) => (
+                                <CustomerRow
+                                    key={customer.id}
+                                    customer={customer}
+                                    isReadOnly={isReadOnly}
+                                    onEdit={(c) => {
+                                        setEditingCustomer(c)
+                                        setEditCpf(c.cpf || '')
+                                        setEditPhone(c.phone || '')
+                                    }}
+                                    onToggleActive={handleToggleActive}
+                                />
+                            ))}
                         </TableBody>
                     </Table>
                 </CardContent>

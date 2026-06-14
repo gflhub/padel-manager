@@ -45,10 +45,10 @@ enum ReservationStatus {
 
 /// Product category for organization
 enum ProductCategory {
-  FOOD
-  BEVERAGE
-  EQUIPMENT
-  OTHER
+  bebidas
+  lanches
+  doces
+  outros
 }
 
 /// Comanda (order/tab) status for payment tracking
@@ -63,6 +63,7 @@ enum PaymentMethod {
   CASH
   CARD
   TRANSFER
+  PIX
   OTHER
 }
 
@@ -78,6 +79,13 @@ enum TournamentStatus {
 enum RegistrationStatus {
   PENDING
   CONFIRMED
+  CANCELLED
+}
+
+/// Monthly-member subscription status
+enum SubscriptionStatus {
+  ACTIVE
+  OVERDUE
   CANCELLED
 }
 
@@ -101,6 +109,7 @@ model User {
   clubStaff    ClubStaff[]
   reservations Reservation[]
   tournaments  TournamentRegistration[]
+  subscriptions Subscription[]
 
   @@index([email])
   @@index([globalRole])
@@ -158,13 +167,41 @@ model Club {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
+  trialStartedAt          DateTime?
+  trialEndsAt             DateTime?
+  trialWarningEmailSentAt DateTime?
+
   staff       ClubStaff[]
   courts      Court[]
   products    Product[]
   comandas    Comanda[]
   tournaments Tournament[]
+  settings    ClubSettings?
+  subscriptions Subscription[]
 
   @@index([active])
+}
+
+/// Club-wide settings (complex info, reservation policies, payment options)
+model ClubSettings {
+  id                  String   @id @default(uuid()) @db.VarChar(36)
+  clubId              String   @unique @db.VarChar(36)
+  complexName         String?
+  complexAddress      String?
+  complexPhone        String?
+  complexEmail        String?
+  maxAdvanceDays      Int      @default(30)
+  defaultSlotDuration Int      @default(90)
+  allowPayLater       Boolean  @default(true)
+  allowCredits        Boolean  @default(true)
+  pixKey              String?
+  updatedBy           String?  @db.VarChar(36)
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId])
 }
 
 /// Staff member role within a specific club
@@ -193,13 +230,15 @@ model ClubStaff {
 
 /// Court at a club for hosting reservations
 model Court {
-  id        String      @id @default(uuid()) @db.VarChar(36)
-  clubId    String      @db.VarChar(36)
-  name      String
-  type      String
-  status    CourtStatus @default(ACTIVE)
-  createdAt DateTime    @default(now())
-  updatedAt DateTime    @updatedAt
+  id           String      @id @default(uuid()) @db.VarChar(36)
+  clubId       String      @db.VarChar(36)
+  name         String
+  type         String
+  pricePerSlot Decimal     @default(0) @db.Decimal(10, 2)
+  durationSlot Int         @default(60)
+  status       CourtStatus @default(ACTIVE)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
 
   club         Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
   reservations Reservation[]
@@ -216,6 +255,9 @@ model Reservation {
   date      DateTime
   startTime String
   endTime   String
+  players   Json?
+  pricePerHour Decimal?      @db.Decimal(10, 2)
+  totalPrice Decimal?         @db.Decimal(10, 2)
   status    ReservationStatus @default(PENDING)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
@@ -242,6 +284,7 @@ model Product {
   name      String
   category  ProductCategory
   price     Decimal         @db.Decimal(10, 2)
+  stock     Int             @default(0)
   available Boolean         @default(true)
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
@@ -256,13 +299,14 @@ model Product {
 
 /// Comanda (order/tab) for tracking purchases
 model Comanda {
-  id        String        @id @default(uuid()) @db.VarChar(36)
-  clubId    String        @db.VarChar(36)
-  number    Int
-  status    ComandaStatus @default(OPEN)
-  total     Decimal       @default(0) @db.Decimal(10, 2)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id           String        @id @default(uuid()) @db.VarChar(36)
+  clubId       String        @db.VarChar(36)
+  number       Int
+  customerName String?       @db.VarChar(255)
+  status       ComandaStatus @default(OPEN)
+  total        Decimal       @default(0) @db.Decimal(10, 2)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   club     Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
   items    ComandaItem[]
@@ -277,15 +321,16 @@ model Comanda {
 model ComandaItem {
   id        String   @id @default(uuid()) @db.VarChar(36)
   comandaId String   @db.VarChar(36)
-  productId String   @db.VarChar(36)
+  productId String?  @db.VarChar(36)
+  name      String?
   quantity  Int
   unitPrice Decimal  @db.Decimal(10, 2)
   subtotal  Decimal  @db.Decimal(10, 2)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  comanda Comanda @relation(fields: [comandaId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id], onDelete: Restrict)
+  comanda Comanda  @relation(fields: [comandaId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
 
   @@index([comandaId])
   @@index([productId])
@@ -354,4 +399,31 @@ model TournamentRegistration {
   @@index([tournamentId])
   @@index([userId])
   @@index([status])
+}
+
+// ============================================================================
+// MONTHLY MEMBER (SUBSCRIPTION) MODELS
+// ============================================================================
+
+/// Monthly-member subscription plan for a user at a club
+model Subscription {
+  id          String             @id @default(uuid()) @db.VarChar(36)
+  userId      String             @db.VarChar(36)
+  clubId      String             @db.VarChar(36)
+  planName    String
+  price       Decimal            @db.Decimal(10, 2)
+  dueDay      Int
+  status      SubscriptionStatus @default(ACTIVE)
+  nextDueDate DateTime
+  dueWarningEmailSentAt DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  club Club @relation(fields: [clubId], references: [id], onDelete: Cascade)
+
+  @@index([clubId])
+  @@index([userId])
+  @@index([status])
+  @@index([nextDueDate])
 }

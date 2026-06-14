@@ -1,6 +1,7 @@
 'use server'
 
 import { requireUser, requireClubContext } from '@/lib/auth/session'
+import { assertClubWritable } from '@/lib/club-trial'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import * as reservationRepo from '@/lib/repositories/reservations'
@@ -53,6 +54,7 @@ async function ensureClubMembership(profileId: string, clubId: string) {
 export async function createReservation(formData: FormData) {
     try {
         const user = await requireUser()
+        if (!user.profileId) return { error: 'Perfil de usuário não encontrado' }
 
         const raw = {
             court_id: formData.get('court_id') as string,
@@ -74,6 +76,8 @@ export async function createReservation(formData: FormData) {
         if (courtResult.error || !courtResult.data) return { error: 'Quadra não encontrada' }
         const court = courtResult.data
 
+        await assertClubWritable(court.club_id)
+
         // Check for overlaps
         const overlapResult = await reservationRepo.checkReservationOverlap(
             parsed.data.court_id,
@@ -86,9 +90,10 @@ export async function createReservation(formData: FormData) {
 
         const total_price = court.price_per_slot
         const price_per_player = total_price / (parsed.data.players.length || 1)
+        const price_per_hour = court.duration_slot > 0 ? court.price_per_slot / (court.duration_slot / 60) : court.price_per_slot
 
         const result = await reservationRepo.createReservation(
-            user.id,
+            user.profileId,
             court.club_id,
             parsed.data.court_id,
             parsed.data.date,
@@ -97,7 +102,8 @@ export async function createReservation(formData: FormData) {
             parsed.data.duration,
             parsed.data.players,
             total_price,
-            price_per_player
+            price_per_player,
+            price_per_hour
         )
 
         if (result.error) return { error: result.error }
@@ -114,6 +120,7 @@ export async function updateReservationStatus(id: string, status: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await reservationRepo.updateReservationStatus(id, context.clubId, status)
         if (result.error) return { error: result.error }

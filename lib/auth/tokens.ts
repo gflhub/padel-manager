@@ -1,6 +1,8 @@
 import { randomBytes, createHash } from 'crypto'
-import { sign, verify, SignOptions } from 'jsonwebtoken'
+import { sign, SignOptions } from 'jsonwebtoken'
 import { prisma } from '../db/prisma'
+
+export { verifyAccessToken } from './jwt'
 
 // ============================================================================
 // JWT ACCESS TOKEN FUNCTIONS
@@ -46,33 +48,6 @@ export async function signAccessToken(
   )
 
   return token
-}
-
-/**
- * Verify a JWT access token and extract payload.
- * @param token - The JWT token to verify
- * @returns Decoded payload on success, null if invalid or expired
- */
-export async function verifyAccessToken(
-  token: string
-): Promise<{ sub: string; sessionId: string; tokenVersion: number } | null> {
-  const secret = process.env.JWT_SECRET
-
-  if (!secret) {
-    throw new Error('JWT_SECRET environment variable is not configured')
-  }
-
-  try {
-    const decoded = verify(token, secret) as {
-      sub: string
-      sessionId: string
-      tokenVersion: number
-    }
-
-    return decoded
-  } catch {
-    return null
-  }
 }
 
 // ============================================================================
@@ -217,6 +192,7 @@ export async function refreshAccessToken(
       sessionId: updatedSession.id,
     }
   } catch (error) {
+    console.error('[tokens] refreshAccessToken failed:', error)
     return null
   }
 }
@@ -237,7 +213,8 @@ export async function revokeSession(sessionId: string): Promise<boolean> {
     })
 
     return true
-  } catch {
+  } catch (error) {
+    console.error('[tokens] revokeSession failed:', error)
     return false
   }
 }

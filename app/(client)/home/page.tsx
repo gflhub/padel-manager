@@ -1,21 +1,14 @@
-import { createClient } from '@/lib/supabase/server'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import Link from 'next/link'
 import { Clock, Users, MapPin, Calendar } from "lucide-react"
+import { getActiveCourts } from "@/app/actions/courts"
 
 export default async function ClientHomePage() {
-    const supabase = await createClient()
+    const { data: courts } = await getActiveCourts()
 
-    const { data: courts } = await supabase
-        .from('courts')
-        .select('*')
-        .eq('active', true)
-        .order('name')
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const courtsList = (courts || []) as any[]
+    const courtsList = courts || []
 
     const courtTypeLabels: Record<string, string> = {
         padel: 'Padel',

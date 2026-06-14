@@ -1,17 +1,16 @@
-import { createClient } from '@/lib/supabase/server'
+import { getCurrentUser } from '@/lib/auth/session'
 import { getClubContext } from '@/lib/get-club-role'
 import { redirect } from 'next/navigation'
 
 export default async function RootPage() {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
+    const user = await getCurrentUser()
 
-    if (!user) {
+    if (!user || !user.profileId) {
         redirect('/login')
     }
 
     // Se for staff de algum clube → área administrativa
-    const clubCtx = await getClubContext(user.id)
+    const clubCtx = await getClubContext(user.profileId)
     if (clubCtx) {
         redirect('/dashboard')
     }

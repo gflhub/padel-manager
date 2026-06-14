@@ -1,7 +1,6 @@
 'use server'
 
 import { cookies } from 'next/headers'
-import { createClient } from '@/lib/supabase/server'
 import { verifyAccessToken } from '@/lib/auth/tokens'
 import { prisma } from '@/lib/db/prisma'
 
@@ -19,11 +18,11 @@ export interface ClubContext {
 
 /**
  * Get the current user from the session.
- * Tries JWT verification first (app-owned tokens), then falls back to Supabase.
- * Returns null if not authenticated via either method.
+ * Verifies the JWT access token and ensures its tokenVersion matches the
+ * user's current tokenVersion (revoked tokens are rejected).
+ * Returns null if not authenticated.
  */
 export async function getCurrentUser(): Promise<User | null> {
-  // Try JWT verification first (app-owned tokens)
   try {
     const cookieStore = await cookies()
     const accessToken = cookieStore.get('accessToken')?.value
@@ -32,7 +31,6 @@ export async function getCurrentUser(): Promise<User | null> {
       const payload = await verifyAccessToken(accessToken)
 
       if (payload) {
-        // JWT is valid, fetch user from database
         const user = await prisma.user.findUnique({
           where: { id: payload.sub },
           include: {
@@ -42,7 +40,7 @@ export async function getCurrentUser(): Promise<User | null> {
           },
         })
 
-        if (user) {
+        if (user && user.tokenVersion === payload.tokenVersion) {
           return {
             id: user.id,
             email: user.profile?.email || user.email,
@@ -51,34 +49,11 @@ export async function getCurrentUser(): Promise<User | null> {
         }
       }
     }
-  } catch {
-    // Silent catch: fall through to Supabase fallback
+  } catch (error) {
+    console.error('[session] getCurrentUser failed:', error)
   }
 
-  // Fallback to Supabase for migration period
-  try {
-    const supabase = createClient()
-    const { data, error } = await supabase.auth.getUser()
-
-    if (error || !data.user) {
-      return null
-    }
-
-    // Fetch the profile to get profileId
-    const { data: profile } = await supabase
-      .from('profiles')
-      .select('id')
-      .eq('id', data.user.id)
-      .single()
-
-    return {
-      id: data.user.id,
-      email: data.user.email || '',
-      profileId: profile?.id,
-    }
-  } catch {
-    return null
-  }
+  return null
 }
 
 /**
@@ -101,10 +76,21 @@ export async function requireUser(): Promise<User> {
  */
 export async function requireClubContext(userId: string): Promise<ClubContext> {
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profile: { select: { id: true } } },
+    })
+
+    const profileId = user?.profile?.id
+
+    if (!profileId) {
+      throw new Error('User is not a staff member of any club')
+    }
+
     // Query club_staff with active status, ordered by creation date
     const clubStaff = await prisma.clubStaff.findFirst({
       where: {
-        userId,
+        profileId,
         active: true,
       },
       select: {
@@ -134,13 +120,11 @@ export async function requireClubContext(userId: string): Promise<ClubContext> {
 }
 
 /**
- * Refresh the session using JWT refresh token or Supabase.
- * Tries JWT refresh first (app-owned tokens), then falls back to Supabase.
+ * Refresh the session using the JWT refresh token.
  * Updates both access and refresh tokens in cookies if successful.
  * Returns the current user or null if refresh failed.
  */
 export async function refreshSession(): Promise<User | null> {
-  // Try JWT refresh first (app-owned tokens)
   try {
     const cookieStore = await cookies()
     const refreshToken = cookieStore.get('refreshToken')?.value
@@ -168,18 +152,9 @@ export async function refreshSession(): Promise<User | null> {
         return getCurrentUser()
       }
     }
-  } catch {
-    // Silent catch: fall through to Supabase fallback
+  } catch (error) {
+    console.error('[session] refreshSession failed:', error)
   }
 
-  // Fallback to Supabase for migration period
-  try {
-    const supabase = createClient()
-
-    // Supabase middleware handles token refresh automatically
-    // Just verify the user still exists
-    return getCurrentUser()
-  } catch {
-    return null
-  }
+  return null
 }

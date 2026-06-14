@@ -20,6 +20,7 @@ export interface Reservation {
   end_time: string;
   duration: number;
   players: Array<{ name: string }>;
+  price_per_hour: number;
   total_price: number;
   price_per_player: number;
   status: 'PENDING' | 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
@@ -29,6 +30,7 @@ export interface Reservation {
   created_by: string;
   created_at: string;
   updated_at: string;
+  court: { id: string; name: string; court_type: string } | null;
 }
 
 export interface ReservationFilters {
@@ -45,6 +47,62 @@ export interface ReservationOverlapCheck {
 export interface BookedSlot {
   start_time: string;
   end_time: string;
+}
+
+function timeToMinutes(timeStr: string): number {
+  const [hours, minutes] = timeStr.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+type PrismaReservation = {
+  id: string;
+  profileId: string;
+  courtId: string;
+  date: Date;
+  startTime: string;
+  endTime: string;
+  players: unknown;
+  pricePerHour: { toNumber: () => number } | number | null;
+  totalPrice: { toNumber: () => number } | number | null;
+  status: ReservationStatus;
+  userId: string | null;
+  createdAt: Date;
+  updatedAt: Date;
+  court?: { id: string; name: string; type: string; clubId: string };
+};
+
+function mapReservation(reservation: PrismaReservation): Reservation {
+  const players = (Array.isArray(reservation.players) ? reservation.players : []) as Array<{ name: string }>;
+  const totalPrice = reservation.totalPrice == null
+    ? 0
+    : typeof reservation.totalPrice === 'number'
+      ? reservation.totalPrice
+      : Number(reservation.totalPrice);
+  const pricePerHour = reservation.pricePerHour == null
+    ? 0
+    : typeof reservation.pricePerHour === 'number'
+      ? reservation.pricePerHour
+      : Number(reservation.pricePerHour);
+
+  return {
+    id: reservation.id,
+    profile_id: reservation.profileId,
+    club_id: reservation.court?.clubId ?? '',
+    court_id: reservation.courtId,
+    date: reservation.date.toISOString().split('T')[0],
+    start_time: reservation.startTime,
+    end_time: reservation.endTime,
+    duration: timeToMinutes(reservation.endTime) - timeToMinutes(reservation.startTime),
+    players,
+    price_per_hour: pricePerHour,
+    total_price: totalPrice,
+    price_per_player: players.length > 0 ? totalPrice / players.length : totalPrice,
+    status: reservation.status,
+    created_by: reservation.userId ?? reservation.profileId,
+    created_at: reservation.createdAt.toISOString(),
+    updated_at: reservation.updatedAt.toISOString(),
+    court: reservation.court ? { id: reservation.court.id, name: reservation.court.name, court_type: reservation.court.type } : null,
+  };
 }
 
 /**
@@ -86,11 +144,35 @@ export async function getReservationsByClub(
       orderBy: [{ date: 'asc' }, { startTime: 'asc' }],
     });
 
-    return { data: reservations as unknown as Reservation[], error: null };
+    return { data: reservations.map(mapReservation), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar reservas';
     return { data: null, error: message };
   }
+}
+
+/**
+ * Get total revenue from confirmed reservations for a club within a date range.
+ * @param clubId - Club ID
+ * @param startDate - Range start (inclusive)
+ * @param endDate - Range end (exclusive)
+ * @returns Sum of reservation total prices
+ */
+export async function getReservationRevenueByClub(
+  clubId: string,
+  startDate: Date,
+  endDate: Date
+): Promise<number> {
+  const result = await prisma.reservation.aggregate({
+    _sum: { totalPrice: true },
+    where: {
+      status: 'CONFIRMED',
+      date: { gte: startDate, lt: endDate },
+      court: { clubId },
+    },
+  })
+
+  return result._sum.totalPrice ? Number(result._sum.totalPrice) : 0
 }
 
 /**
@@ -102,10 +184,11 @@ export async function getUserReservations(userId: string): Promise<{ data: Reser
   try {
     const reservations = await prisma.reservation.findMany({
       where: { profileId: userId },
+      include: { court: true },
       orderBy: [{ date: 'desc' }, { startTime: 'desc' }],
     });
 
-    return { data: reservations as unknown as Reservation[], error: null };
+    return { data: reservations.map(mapReservation), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao buscar reservas do usuário';
     return { data: null, error: message };
@@ -212,7 +295,7 @@ export async function getBookedSlots(
 
 /**
  * Create a new reservation.
- * @param userId - User ID (profile_id)
+ * @param profileId - Profile ID of the user making the reservation
  * @param clubId - Club ID
  * @param courtId - Court ID
  * @param date - Reservation date
@@ -222,10 +305,11 @@ export async function getBookedSlots(
  * @param players - List of players
  * @param totalPrice - Total price
  * @param pricePerPlayer - Price per player
+ * @param pricePerHour - Court's price per hour at the time of booking
  * @returns Created reservation or error
  */
 export async function createReservation(
-  userId: string,
+  profileId: string,
   clubId: string,
   courtId: string,
   date: string,
@@ -234,22 +318,26 @@ export async function createReservation(
   duration: number,
   players: Array<{ name: string }>,
   totalPrice: number,
-  pricePerPlayer: number
+  pricePerPlayer: number,
+  pricePerHour: number
 ): Promise<{ data: Reservation | null; error: string | null }> {
   try {
     const reservation = await prisma.reservation.create({
       data: {
-        profileId: userId,
+        profileId,
         courtId,
-        userId,
         date: new Date(date),
         startTime,
         endTime,
+        players,
+        pricePerHour,
+        totalPrice,
         status: 'CONFIRMED',
       },
+      include: { court: true },
     });
 
-    return { data: reservation as unknown as Reservation, error: null };
+    return { data: mapReservation(reservation), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar reserva';
     return { data: null, error: message };

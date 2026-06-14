@@ -38,7 +38,7 @@ export async function signUp(
   email: string,
   password: string,
   name?: string
-): Promise<{ data?: { accessToken: string; refreshToken: string }; error?: string }> {
+): Promise<{ data?: { userId: string; isStaff: boolean }; error?: string }> {
   try {
     // Validate input
     const { email: validEmail, password: validPassword, name: validName } = signUpSchema.parse({
@@ -103,8 +103,8 @@ export async function signUp(
 
     return {
       data: {
-        accessToken,
-        refreshToken,
+        userId: user.id,
+        isStaff: false, // New users are never staff initially
       },
     }
   } catch (error) {
@@ -126,7 +126,7 @@ export async function signUp(
 export async function signIn(
   email: string,
   password: string
-): Promise<{ data?: { accessToken: string; refreshToken: string }; error?: string }> {
+): Promise<{ data?: { userId: string; isStaff: boolean }; error?: string }> {
   try {
     // Validate input
     const { email: validEmail, password: validPassword } = signInSchema.parse({
@@ -172,10 +172,12 @@ export async function signIn(
       maxAge: 30 * 24 * 60 * 60, // 30 days
     })
 
+    const staffResult = await checkUserStaffRole(user.id)
+
     return {
       data: {
-        accessToken,
-        refreshToken,
+        userId: user.id,
+        isStaff: staffResult.isStaff,
       },
     }
   } catch (error) {
@@ -190,63 +192,40 @@ export async function signIn(
 }
 
 // ============================================================================
-// SIGN OUT
+// SIGN OUT (invalidates the session and bumps tokenVersion, clears cookies)
 // ============================================================================
 
-export async function signOut(sessionId?: string): Promise<{ error?: string }> {
+export async function signOut(): Promise<{ error?: string }> {
+  const cookieStore = await cookies()
+
   try {
-    if (!sessionId) {
-      return { error: 'Session ID is required' }
-    }
-
-    const success = await tokens.revokeSession(sessionId)
-
-    if (!success) {
-      return { error: 'Failed to sign out' }
-    }
-
-    return {}
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred during sign out'
-    console.error('Sign out error:', errorMessage)
-    return { error: 'Failed to sign out' }
-  }
-}
-
-// ============================================================================
-// LOGOUT (revokes session and clears cookies)
-// ============================================================================
-
-export async function logout(): Promise<{ error?: string }> {
-  try {
-    const cookieStore = await cookies()
-
-    // Extract session ID from access token
     const accessToken = cookieStore.get('accessToken')?.value
     if (accessToken) {
       const payload = await tokens.verifyAccessToken(accessToken)
+
+      if (payload?.sub) {
+        await prisma.user.update({
+          where: { id: payload.sub },
+          data: { tokenVersion: { increment: 1 } },
+        })
+      }
+
       if (payload?.sessionId) {
         await tokens.revokeSession(payload.sessionId)
       }
     }
 
-    // Clear cookies
     cookieStore.delete('accessToken')
     cookieStore.delete('refreshToken')
 
     return {}
   } catch (error) {
     // Clear cookies anyway for cleanup (graceful degradation)
-    try {
-      const cookieStore = await cookies()
-      cookieStore.delete('accessToken')
-      cookieStore.delete('refreshToken')
-    } catch {
-      // Ignore errors during cleanup
-    }
+    cookieStore.delete('accessToken')
+    cookieStore.delete('refreshToken')
 
-    const errorMessage = error instanceof Error ? error.message : 'An error occurred during logout'
-    console.error('Logout error:', errorMessage)
+    const errorMessage = error instanceof Error ? error.message : 'An error occurred during sign out'
+    console.error('Sign out error:', errorMessage)
     return { error: 'Logout failed but cookies cleared' }
   }
 }
@@ -294,9 +273,20 @@ export async function refreshAccessToken(
 
 export async function checkUserStaffRole(userId: string): Promise<{ isStaff: boolean; error: string | null }> {
   try {
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { profile: { select: { id: true } } },
+    })
+
+    const profileId = user?.profile?.id
+
+    if (!profileId) {
+      return { isStaff: false, error: null }
+    }
+
     const staffRole = await prisma.clubStaff.findFirst({
       where: {
-        userId,
+        profileId,
         active: true,
       },
       select: {

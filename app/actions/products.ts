@@ -4,6 +4,7 @@ import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import { z } from 'zod'
 import * as productRepo from '@/lib/repositories/products'
+import { assertClubWritable } from '@/lib/club-trial'
 
 const productSchema = z.object({
     name: z.string().min(1, 'Nome é obrigatório'),
@@ -28,6 +29,7 @@ export async function createProduct(formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: formData.get('name') as string,
@@ -61,6 +63,7 @@ export async function updateProduct(id: string, formData: FormData) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const raw = {
             name: formData.get('name') as string,
@@ -97,6 +100,7 @@ export async function deleteProduct(id: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await productRepo.deleteProduct(id, context.clubId)
         if (result.error) return { error: result.error }

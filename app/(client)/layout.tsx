@@ -8,27 +8,27 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { Menu, Home, Calendar, User, LogOut, Trophy } from 'lucide-react'
 import { signOut } from '@/app/actions/auth'
 import { LogoutMenuItem } from '@/components/logout-menu-item'
+import { getCurrentUser } from '@/lib/auth/session'
 
 export default async function ClientLayout({
     children,
 }: {
     children: React.ReactNode
 }) {
-    // TODO: Get userId from session/middleware
-    const userId = null
-    if (!userId) {
+    const user = await getCurrentUser()
+    if (!user || !user.profileId) {
         redirect('/login')
     }
 
     const profile = await prisma.profile.findUnique({
-        where: { id: userId },
+        where: { id: user.profileId },
         select: { name: true, email: true }
     })
 
     // Check if also staff of any club (for showing admin link)
     const staff = await prisma.clubStaff.findFirst({
         where: {
-            profileId: userId,
+            profileId: user.profileId,
             active: true
         },
         select: { id: true }
@@ -38,6 +38,11 @@ export default async function ClientLayout({
         name: profile?.name,
         email: profile?.email,
         isStaff: !!staff,
+    }
+
+    async function handleSignOut(): Promise<void> {
+        'use server'
+        await signOut()
     }
 
     const displayName = userData?.name || 'Usuário'
@@ -90,7 +95,7 @@ export default async function ClientLayout({
                                             <span className="text-xs text-muted-foreground">{userData?.email}</span>
                                         </div>
                                     </div>
-                                    <form action={signOut}>
+                                    <form action={handleSignOut}>
                                         <Button variant="outline" className="w-full justify-start" size="sm">
                                             <LogOut className="mr-2 h-4 w-4" />
                                             Sair

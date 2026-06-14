@@ -3,11 +3,13 @@
 import { requireUser, requireClubContext } from '@/lib/auth/session'
 import { revalidatePath } from 'next/cache'
 import * as comandaRepo from '@/lib/repositories/comandas'
+import { assertClubWritable } from '@/lib/club-trial'
 
 export async function updateComandaItemQuantity(itemId: string, newQuantity: number) {
     try {
         const user = await requireUser()
-        await requireClubContext(user.id)
+        const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await comandaRepo.updateComandaItemQuantity(itemId, newQuantity)
         if (result.error) return { error: result.error }
@@ -24,6 +26,7 @@ export async function cancelComanda(id: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
         const result = await comandaRepo.cancelComanda(id, context.clubId, context.userId)
         if (result.error) return { error: result.error }
