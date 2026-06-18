@@ -10,15 +10,18 @@ import { Chrome, Loader2 } from "lucide-react"
 import { useRouter } from 'next/navigation'
 import { toast } from 'sonner'
 import { signIn, signUp } from '@/app/actions/auth'
+import { TESTIDS } from '@/lib/testids'
 
 export default function LoginPage() {
     const router = useRouter()
     const [loading, setLoading] = useState(false)
     const [isSignUp, setIsSignUp] = useState(false)
+    const [authError, setAuthError] = useState<string | null>(null)
 
     const handleEmailLogin = async (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault()
         setLoading(true)
+        setAuthError(null)
 
         const formData = new FormData(e.currentTarget)
         const email = formData.get('email') as string
@@ -28,11 +31,12 @@ export default function LoginPage() {
             const result = await signUp(email, password)
 
             if (result.error) {
+                setAuthError(result.error)
                 toast.error(result.error)
                 setLoading(false)
             } else if (result.data) {
                 toast.success('Conta criada com sucesso!')
-                
+
                 // Redireciona com base nos dados retornados da action
                 if (result.data.isStaff) {
                     router.push('/dashboard')
@@ -45,16 +49,20 @@ export default function LoginPage() {
             const result = await signIn(email, password)
 
             if (result.error) {
+                setAuthError('Credenciais inválidas')
                 toast.error('Email ou senha incorretos')
                 setLoading(false)
             } else if (result.data) {
                 toast.success('Login realizado com sucesso!')
 
-                // Redireciona com base nos dados retornados da action
+                // Redireciona com base nos dados retornados da action.
+                // Diferente do signUp, um login bem-sucedido de um cliente
+                // existente vai para a área do cliente, não para onboarding
+                // (que é só para criar um novo clube).
                 if (result.data.isStaff) {
                     router.push('/dashboard')
                 } else {
-                    router.push('/onboarding')
+                    router.push('/home')
                 }
                 router.refresh()
             }
@@ -73,7 +81,7 @@ export default function LoginPage() {
 
             <Card className="w-full max-w-md relative z-10 shadow-2xl border-slate-700">
                 <CardHeader className="space-y-1 text-center pb-6">
-                    <div className="mx-auto h-16 w-16 rounded-2xl bg-primary flex items-center justify-center mb-4 shadow-lg">
+                    <div data-testid={TESTIDS.LOGO} className="mx-auto h-16 w-16 rounded-2xl bg-primary flex items-center justify-center mb-4 shadow-lg">
                         <span className="text-primary-foreground font-bold text-2xl">PM</span>
                     </div>
                     <CardTitle className="text-3xl font-bold">Padel Manager</CardTitle>
@@ -93,6 +101,7 @@ export default function LoginPage() {
                                 required
                                 disabled={loading}
                                 className="h-11"
+                                data-testid={TESTIDS.EMAIL_INPUT}
                             />
                         </div>
                         <div className="space-y-2">
@@ -105,12 +114,28 @@ export default function LoginPage() {
                                 required
                                 disabled={loading}
                                 className="h-11"
+                                data-testid={TESTIDS.PASSWORD_INPUT}
                             />
                         </div>
-                        <Button type="submit" className="w-full h-11 text-base" disabled={loading}>
+                        {authError && (
+                            <p data-testid={TESTIDS.AUTH_ERROR} className="text-sm text-destructive">
+                                {authError}
+                            </p>
+                        )}
+                        <Button type="submit" className="w-full h-11 text-base" disabled={loading} data-testid={TESTIDS.LOGIN_SUBMIT}>
                             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                             {loading ? 'Entrando...' : (isSignUp ? 'Criar Conta' : 'Entrar')}
                         </Button>
+                        {!isSignUp && (
+                            <button
+                                type="button"
+                                data-testid={TESTIDS.FORGOT_PASSWORD}
+                                onClick={() => toast.info('Recuperação de senha será disponibilizada em breve')}
+                                className="block text-center text-xs text-muted-foreground hover:underline w-full"
+                            >
+                                Esqueci minha senha
+                            </button>
+                        )}
                     </form>
 
                     <div className="relative">
@@ -145,8 +170,8 @@ export default function LoginPage() {
 
                     {!isSignUp && (
                         <div className="mt-6 p-4 bg-muted rounded-lg">
-                            <p className="text-xs text-muted-foreground text-center mb-2 font-medium">Contas de Teste:</p>
-                            <div className="space-y-1 text-xs text-muted-foreground">
+                            <p className="text-xs text-slate-600 text-center mb-2 font-medium">Contas de Teste:</p>
+                            <div className="space-y-1 text-xs text-slate-600">
                                 <p><strong>Admin:</strong> admin@padelmanager.com</p>
                                 <p><strong>Senha:</strong> adm@padel2026</p>
                             </div>

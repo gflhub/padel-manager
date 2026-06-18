@@ -109,6 +109,28 @@ export async function getCourtById(courtId: string, clubId: string): Promise<{ d
 }
 
 /**
+ * Get a court by id without club scoping. Used by the client booking flow,
+ * which (like `getActiveCourts`) lists/books courts catalog-wide rather than
+ * scoped to a club membership.
+ */
+export async function getCourtByIdUnscoped(courtId: string): Promise<{ data: Court | null; error: string | null }> {
+  try {
+    const court = await prisma.court.findUnique({
+      where: { id: courtId },
+    });
+
+    if (!court) {
+      return { data: null, error: 'Quadra não encontrada' };
+    }
+
+    return { data: mapCourt(court), error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao buscar quadra';
+    return { data: null, error: message };
+  }
+}
+
+/**
  * Create a new court.
  * @param clubId - Club ID
  * @param name - Court name

@@ -74,7 +74,7 @@ export async function registerReservationPayment(formData: FormData) {
       return { error: result.error.issues[0].message, data: null }
     }
 
-    const reservationResult = await reservationRepo.getUserReservations(user.id)
+    const reservationResult = await reservationRepo.getUserReservations(user.profileId ?? '')
     if (reservationResult.error || !reservationResult.data) {
       return { error: 'Reserva não encontrada', data: null }
     }

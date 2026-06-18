@@ -7,6 +7,7 @@ import { TonalBadge } from "@/components/ui/tonal-badge"
 import { getInitials, getAvatarColors } from "@/lib/format-helpers"
 import { CheckCircle2, Ban } from "lucide-react"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
+import { TESTIDS } from "@/lib/testids"
 
 export interface Subscription {
     id: string
@@ -63,7 +64,7 @@ export function MemberRow({ subscription, onMarkPaid, onCancel, isReadOnly = fal
             </TableCell>
             <TableCell className="text-sm">Dia {subscription.due_day}</TableCell>
             <TableCell className="text-sm">{formatDate(subscription.next_due_date)}</TableCell>
-            <TableCell>
+            <TableCell data-testid={TESTIDS.MEMBER_STATUS}>
                 {subscription.status === 'ACTIVE' && <TonalBadge color="emerald">Em dia</TonalBadge>}
                 {subscription.status === 'OVERDUE' && <TonalBadge color="red">Em atraso</TonalBadge>}
                 {subscription.status === 'CANCELLED' && <TonalBadge color="slate">Cancelado</TonalBadge>}

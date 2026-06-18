@@ -9,6 +9,7 @@ import { Menu, Home, Calendar, User, LogOut, Trophy } from 'lucide-react'
 import { signOut } from '@/app/actions/auth'
 import { LogoutMenuItem } from '@/components/logout-menu-item'
 import { getCurrentUser } from '@/lib/auth/session'
+import { TESTIDS } from '@/lib/testids'
 
 export default async function ClientLayout({
     children,
@@ -62,7 +63,7 @@ export default async function ClientLayout({
                     {/* Mobile Menu */}
                     <Sheet>
                         <SheetTrigger asChild className="md:hidden">
-                            <Button variant="ghost" size="icon">
+                            <Button variant="ghost" size="icon" data-testid={TESTIDS.MOBILE_MENU_TOGGLE}>
                                 <Menu className="h-5 w-5" />
                             </Button>
                         </SheetTrigger>
@@ -129,7 +130,7 @@ export default async function ClientLayout({
                     {/* User Menu */}
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" className="relative h-10 w-10 rounded-full">
+                            <Button variant="ghost" className="relative h-10 w-10 rounded-full" data-testid={TESTIDS.USER_MENU}>
                                 <Avatar className="h-10 w-10">
                                     <AvatarFallback className="bg-primary text-primary-foreground">
                                         {initials}

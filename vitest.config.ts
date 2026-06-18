@@ -9,6 +9,7 @@ export default defineConfig(({ mode }) => ({
     testTimeout: 10000,
     hookTimeout: 10000,
     env: loadEnv(mode, process.cwd(), ''),
+    exclude: ['**/node_modules/**', '**/e2e/**'],
   },
   resolve: {
     alias: {

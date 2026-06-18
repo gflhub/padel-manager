@@ -10,6 +10,7 @@ import { getCurrentUser } from '@/lib/auth/session'
 import { getInitials, getAvatarColors, formatHumanDateTime } from '@/lib/format-helpers'
 import { getComandaRevenueByClub } from '@/lib/repositories/payments'
 import { getReservationRevenueByClub } from '@/lib/repositories/reservations'
+import { TESTIDS } from '@/lib/testids'
 
 const fmt = (v: number) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v)
 
@@ -128,17 +129,17 @@ export default async function AdminDashboard() {
     const receitaTotal = receitaComandas + receitaReservas
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-6" data-testid={TESTIDS.ADMIN_DASHBOARD}>
             <div>
                 <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
                 <p className="text-muted-foreground">Visão geral do seu complexo esportivo.</p>
             </div>
 
             <SummaryBar
-                hero={{ label: "Receita Total (Mês)", value: fmt(receitaTotal), icon: DollarSign }}
+                hero={{ label: "Receita Total (Mês)", value: fmt(receitaTotal), icon: DollarSign, testId: TESTIDS.TODAY_REVENUE }}
                 items={[
                     { label: "Reservas no Mês", value: String(totalReservasMes), icon: CalendarCheck, iconClassName: "text-primary", iconBgClassName: "bg-blue-50" },
-                    { label: "Reservas Hoje", value: String(totalHoje), icon: Activity, iconClassName: "text-violet-600", iconBgClassName: "bg-violet-50" },
+                    { label: "Reservas Hoje", value: String(totalHoje), icon: Activity, iconClassName: "text-violet-600", iconBgClassName: "bg-violet-50", testId: TESTIDS.RESERVAS_HOJE },
                     { label: "Comandas Abertas", value: String(comandasAbertasCount), icon: Receipt, iconClassName: "text-amber-600", iconBgClassName: "bg-amber-50" },
                 ]}
             />

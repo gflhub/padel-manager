@@ -12,6 +12,13 @@ import { getClubTrialStatus, sendTrialWarningEmailIfNeeded } from '@/lib/club-tr
 import { sendSubscriptionDueWarnings } from '@/lib/subscription-notifications'
 import { getCurrentUser } from '@/lib/auth/session'
 import { requireStaffRole, requireGlobalAdmin } from '@/lib/auth/authorization'
+import { TESTIDS } from '@/lib/testids'
+
+const NAV_TESTIDS: Record<string, string> = {
+    '/dashboard': TESTIDS.NAV_DASHBOARD,
+    '/admin/settings': TESTIDS.NAV_SETTINGS,
+    '/admin/members': TESTIDS.NAV_MENSALISTAS,
+}
 
 export default async function AdminLayout({
     children,
@@ -82,14 +89,14 @@ export default async function AdminLayout({
         { icon: ShoppingBag, label: 'Produtos', href: '/admin/products' },
         { icon: UserRound, label: 'Clientes', href: '/admin/customers' },
         { icon: Users, label: 'Mensalistas', href: '/admin/members' },
-        { icon: Settings, label: 'Configurações', href: '/admin/settings' },
+        ...(staff.role !== 'STAFF' ? [{ icon: Settings, label: 'Configurações', href: '/admin/settings' }] : []),
         ...(isGlobalAdmin ? [{ icon: Building2, label: 'Clubes', href: '/admin/clubs' }] : []),
     ]
 
     return (
         <div className="flex min-h-screen bg-slate-50">
             {/* Sidebar */}
-            <aside className="hidden md:flex md:w-64 md:flex-col fixed inset-y-0 z-50 border-r bg-white">
+            <aside data-testid={TESTIDS.SIDEBAR} className="hidden md:flex md:w-64 md:flex-col fixed inset-y-0 z-50 border-r bg-white">
                 <div className="flex h-full flex-col">
                     {/* Logo */}
                     <div className="flex h-16 items-center border-b px-6">
@@ -110,6 +117,7 @@ export default async function AdminLayout({
                             <Link
                                 key={item.href}
                                 href={item.href}
+                                data-testid={NAV_TESTIDS[item.href]}
                                 className={cn(
                                     "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all hover:bg-slate-100 hover:text-primary",
                                     "text-slate-700"
@@ -125,7 +133,7 @@ export default async function AdminLayout({
                     <div className="border-t p-4">
                         <DropdownMenu>
                             <DropdownMenuTrigger asChild>
-                                <Button variant="ghost" className="w-full justify-start gap-3 h-auto py-2 px-3">
+                                <Button variant="ghost" className="w-full justify-start gap-3 h-auto py-2 px-3" data-testid={TESTIDS.USER_MENU}>
                                     <Avatar className="h-9 w-9">
                                         <AvatarFallback className="bg-primary text-primary-foreground text-sm">
                                             {initials}
@@ -169,7 +177,7 @@ export default async function AdminLayout({
             </aside>
 
             {/* Main Content */}
-            <div className="flex flex-col flex-1 md:pl-64">
+            <div className="flex flex-col flex-1 min-w-0 md:pl-64">
                 {/* Mobile Header */}
                 <header className="sticky top-0 z-40 flex h-16 items-center gap-4 border-b bg-white px-4 md:hidden">
                     <Link href="/" className="flex items-center gap-2 font-bold">
@@ -181,7 +189,7 @@ export default async function AdminLayout({
                     <div className="flex-1" />
                     <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="rounded-full">
+                            <Button variant="ghost" size="icon" className="rounded-full" data-testid={TESTIDS.MOBILE_MENU_TOGGLE}>
                                 <Avatar className="h-8 w-8">
                                     <AvatarFallback className="bg-primary text-primary-foreground text-xs">
                                         {initials}
@@ -194,7 +202,7 @@ export default async function AdminLayout({
                             <DropdownMenuSeparator />
                             {sidebarItems.map((item) => (
                                 <DropdownMenuItem key={item.href} asChild>
-                                    <Link href={item.href} className="cursor-pointer">
+                                    <Link href={item.href} className="cursor-pointer" data-testid={NAV_TESTIDS[item.href]}>
                                         <item.icon className="mr-2 h-4 w-4" />
                                         {item.label}
                                     </Link>

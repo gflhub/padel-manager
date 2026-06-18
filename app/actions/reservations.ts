@@ -53,12 +53,18 @@ export async function createReservation(formData: FormData) {
         const parsed = reservationSchema.safeParse(raw)
         if (!parsed.success) return { error: parsed.error.issues[0].message }
 
+        // Reject reservations for a date/time already in the past
+        const startDateTime = new Date(`${parsed.data.date}T${parsed.data.start_time}`)
+        if (startDateTime.getTime() < Date.now()) {
+            return { error: 'Não é possível criar reservas para datas ou horários passados' }
+        }
+
         // calculate end_time
         const totalMin = timeToMinutes(parsed.data.start_time) + parsed.data.duration
         const end_time = minutesToTime(totalMin)
 
         // get court price and club_id from repository
-        const courtResult = await courtRepo.getCourtById(parsed.data.court_id, '')
+        const courtResult = await courtRepo.getCourtByIdUnscoped(parsed.data.court_id)
         if (courtResult.error || !courtResult.data) return { error: 'Quadra não encontrada' }
         const court = courtResult.data
 
@@ -123,8 +129,9 @@ export async function updateReservationStatus(id: string, status: string) {
 export async function cancelOwnReservation(id: string) {
     try {
         const user = await requireUser()
+        if (!user.profileId) return { error: 'Perfil de usuário não encontrado' }
 
-        const result = await reservationRepo.cancelUserReservation(id, user.id)
+        const result = await reservationRepo.cancelUserReservation(id, user.profileId)
         if (result.error) return { error: result.error }
 
         revalidatePath('/reservations')
@@ -138,8 +145,9 @@ export async function cancelOwnReservation(id: string) {
 export async function rescheduleOwnReservation(id: string, newDate: string, newStartTime: string, duration: number) {
     try {
         const user = await requireUser()
+        if (!user.profileId) return { error: 'Perfil de usuário não encontrado' }
 
-        const result = await reservationRepo.rescheduleUserReservation(id, user.id, newDate, newStartTime, duration)
+        const result = await reservationRepo.rescheduleUserReservation(id, user.profileId, newDate, newStartTime, duration)
         if (result.error) return { error: result.error }
 
         revalidatePath('/reservations')

@@ -61,11 +61,26 @@ describe('closeComanda', () => {
       id: 'comanda-1',
       clubId: 'club-a',
       total: 150,
+      status: 'OPEN',
     })
 
     const result = await closeComanda('comanda-1', 'club-a', 'cash', 'user-1')
 
     expect(result.error).toBeNull()
     expect(transaction).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects closing a comanda that is already closed, without duplicating the payment', async () => {
+    comandaFindUnique.mockResolvedValue({
+      id: 'comanda-1',
+      clubId: 'club-a',
+      total: 150,
+      status: 'CLOSED',
+    })
+
+    const result = await closeComanda('comanda-1', 'club-a', 'cash', 'user-1')
+
+    expect(result.error).toBe('Comanda já está fechada')
+    expect(transaction).not.toHaveBeenCalled()
   })
 })

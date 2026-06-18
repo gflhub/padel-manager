@@ -44,3 +44,28 @@ next-env.d.ts
 .netlify
 
 /lib/generated/prisma
+
+# Playwright E2E
+/e2e/.auth/
+/test-results/
+/playwright-report/
+/blob-report/
+/playwright/.cache/
+
+.github
+
+# AI agents / assistant configs (local only)
+.claude/
+.codex/
+.gemini/
+.windsurf/
+.cursor/
+openspec/
+CLAUDE.md
+AGENTS.md
+GEMINI.md
+.cursorrules
+
+# AI-generated specs (conteúdo útil migrado para docs/)
+/PROJECT_SPEC.md
+/REUSABLE_ASSETS.md

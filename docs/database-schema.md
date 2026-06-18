@@ -1,4 +1,4 @@
-# Schema do Banco de Dados (Supabase / PostgreSQL)
+# Schema do Banco de Dados (Prisma / MySQL)
 
 Schema inferido a partir das Server Actions e componentes. As tabelas abaixo representam o modelo de dados atual.
 
@@ -16,11 +16,11 @@ Representa um complexo esportivo (tenant).
 ---
 
 ### `profiles`
-Dados de identidade de todos os usuários da plataforma (ligado ao `auth.users` do Supabase).
+Dados de identidade de todos os usuários da plataforma (ligado ao model `User` via `userId`).
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
-| id | uuid PK FK→auth.users | Mesmo ID do Supabase Auth |
+| id | uuid PK FK→User | Mesmo ID do model `User` |
 | name | text | Nome completo |
 | email | text UNIQUE | Email |
 | phone | text | Telefone |
@@ -179,11 +179,11 @@ clubs
   └── comandas
         └── comanda_items (product_id → products)
 
-profiles ← auth.users (Supabase Auth)
+profiles ← User (Prisma, autenticação via JWT)
 ```
 
 ## Notas de design
 
 - **Isolamento por club_id**: toda query admin filtra por `club_id` derivado do contexto do staff logado.
-- **Service role para writes**: operações de escrita usam `createServiceClient()` para bypasear RLS e garantir que o server action controle as permissões.
+- **Acesso via Prisma**: todas as operações de leitura/escrita usam `prisma` (`lib/db/prisma.ts`) em server actions, que controlam as permissões via `requireClubContext()`.
 - **CPF como chave global**: o CPF em `profiles.cpf` serve para deduplicar clientes entre clubes. Um mesmo cliente com CPF pode ser vinculado a múltiplos clubes via `club_members`.

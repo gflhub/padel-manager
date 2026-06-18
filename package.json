@@ -10,7 +10,14 @@
     "test": "vitest",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
-    "db:seed": "npx tsx prisma/seed.ts"
+    "db:seed": "npx tsx prisma/seed.ts",
+    "dev:test": "cross-env-shell E2E_TEST_MODE=1 next dev -p ${E2E_PORT:-3100}",
+    "db:reset:e2e": "cross-env SKIP_PRISMA_SEED=1 npx prisma migrate reset --force",
+    "db:seed:e2e": "npx tsx prisma/seed-e2e.ts",
+    "e2e": "playwright test",
+    "e2e:ui": "playwright test --ui",
+    "e2e:headed": "playwright test --headed",
+    "e2e:report": "playwright show-report"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
@@ -46,6 +53,8 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.11.3",
+    "@playwright/test": "^1.61.0",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^6.1.5",
     "@types/node": "^20",
@@ -55,6 +64,8 @@
     "@vitest/ui": "^1.6.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
+    "cross-env": "^10.1.0",
+    "dotenv-cli": "^11.0.0",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "prisma": "^7.8.0",

@@ -14,6 +14,7 @@ import { Plus, Users, CheckCircle2, AlertTriangle } from "lucide-react"
 import { SummaryBar } from "@/components/summary-bar"
 import { MemberRow, type Subscription } from "./member-row"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
+import { TESTIDS } from "@/lib/testids"
 
 interface ClubMember {
     id: string
@@ -155,6 +156,7 @@ export default function MembersClient({
                     value: String(metrics.total),
                     suffix: `${metrics.active} em dia`,
                     icon: Users,
+                    testId: TESTIDS.MEMBER_TOTAL,
                 }}
                 items={[
                     {

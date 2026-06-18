@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic'
 
 export default async function ClientReservationsPage() {
     const user = await requireUser()
-    const { data: reservations } = await getUserReservations(user.id)
+    const { data: reservations } = await getUserReservations(user.profileId ?? '')
 
     const today = new Date().toISOString().split('T')[0]
     const upcoming = (reservations || []).filter((r) => r.date >= today && !['CANCELLED'].includes(r.status))

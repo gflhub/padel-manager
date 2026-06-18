@@ -312,6 +312,10 @@ export async function closeComanda(
       return { error: 'Comanda não encontrada' };
     }
 
+    if (comanda.status !== 'OPEN') {
+      return { error: 'Comanda já está fechada' };
+    }
+
     // Create payment record and close comanda in transaction
     await prisma.$transaction([
       prisma.payment.create({

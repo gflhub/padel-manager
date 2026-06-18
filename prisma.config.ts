@@ -3,11 +3,21 @@
 import "dotenv/config";
 import { defineConfig } from "prisma/config";
 
+// `prisma migrate reset` always runs the configured seed — there's no
+// --skip-seed in this Prisma version. `db:reset:e2e` sets SKIP_PRISMA_SEED
+// so the schema-only reset doesn't also (dev-)seed; `db:seed:e2e` runs the
+// real two-clubs E2E seed afterwards as its own step.
+const seedCommand = process.env["SKIP_PRISMA_SEED"]
+  ? "true"
+  : process.env["E2E_TEST_MODE"]
+    ? "npx tsx prisma/seed-e2e.ts"
+    : "npx tsx prisma/seed.ts"
+
 export default defineConfig({
   schema: "prisma/schema.prisma",
   migrations: {
     path: "prisma/migrations",
-    seed: "npx tsx prisma/seed.ts",
+    seed: seedCommand,
   },
   datasource: {
     url: process.env["DATABASE_URL"],

@@ -14,6 +14,7 @@ import { createComanda, addComandaItem, closeComanda, getComandaWithItems, close
 import { toast } from "sonner"
 import { Plus, Eye, CreditCard, CheckSquare, Square } from "lucide-react"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
+import { TESTIDS } from "@/lib/testids"
 
 interface Comanda {
     id: string
@@ -204,7 +205,7 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                                         <TableCell>{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(c.total_amount)}</TableCell>
                                         <TableCell className="text-sm text-muted-foreground">{new Date(c.opened_at).toLocaleString('pt-BR')}</TableCell>
                                         <TableCell className="text-right">
-                                            <Button variant="ghost" size="icon" onClick={() => handleView(c)}><Eye className="h-4 w-4" /></Button>
+                                            <Button data-testid="view-comanda" variant="ghost" size="icon" onClick={() => handleView(c)}><Eye className="h-4 w-4" /></Button>
                                         </TableCell>
                                     </TableRow>
                                 ))}
@@ -240,8 +241,8 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                     {viewingComanda && (
                         <div className="space-y-4">
                             <div className="flex justify-between">
-                                <Badge variant={statusVariant(viewingComanda.status)}>{statusLabels[viewingComanda.status]}</Badge>
-                                <span className="text-xl font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingComanda.total_amount)}</span>
+                                <Badge data-testid={TESTIDS.COMANDA_STATUS} variant={statusVariant(viewingComanda.status)}>{statusLabels[viewingComanda.status]}</Badge>
+                                <span data-testid={TESTIDS.COMANDA_TOTAL} className="text-xl font-bold">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(viewingComanda.total_amount)}</span>
                             </div>
                             <Table>
                                 <TableHeader><TableRow><TableHead>Item</TableHead><TableHead>Qtd</TableHead><TableHead>Unitário</TableHead><TableHead className="text-right">Total</TableHead></TableRow></TableHeader>
@@ -295,7 +296,7 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                         <div className="space-y-2">
                             <Label>Forma de Pagamento</Label>
                             <Select value={selectedPayment} onValueChange={setSelectedPayment}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectTrigger data-testid={TESTIDS.PAYMENT_METHOD}><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     <SelectItem value="pix">PIX</SelectItem>
                                     <SelectItem value="card">Cartão</SelectItem>
@@ -303,7 +304,7 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                                 </SelectContent>
                             </Select>
                         </div>
-                        <DialogFooter><Button onClick={handleClose} disabled={loading}>{loading ? 'Fechando...' : 'Confirmar Pagamento'}</Button></DialogFooter>
+                        <DialogFooter><Button data-testid={TESTIDS.CLOSE_COMANDA} onClick={handleClose} disabled={loading}>{loading ? 'Fechando...' : 'Confirmar Pagamento'}</Button></DialogFooter>
                     </div>
                 </DialogContent>
             </Dialog>

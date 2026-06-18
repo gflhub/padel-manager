@@ -6,6 +6,7 @@ export interface SummaryBarHero {
     value: string
     suffix?: string
     icon: LucideIcon
+    testId?: string
 }
 
 export interface SummaryBarItem {
@@ -16,6 +17,7 @@ export interface SummaryBarItem {
     icon: LucideIcon
     iconClassName?: string
     iconBgClassName?: string
+    testId?: string
 }
 
 interface SummaryBarProps {
@@ -33,7 +35,7 @@ export function SummaryBar({ hero, items, className }: SummaryBarProps) {
 
     return (
         <div className={cn("rounded-lg border bg-card shadow-sm flex items-stretch overflow-x-auto", className)}>
-            <div className="relative flex items-center gap-2.5 bg-primary text-primary-foreground overflow-hidden shrink-0 pl-[18px] pr-[22px]">
+            <div data-testid={hero.testId} className="relative flex items-center gap-2.5 bg-primary text-primary-foreground overflow-hidden shrink-0 pl-[18px] pr-[22px]">
                 <div
                     className="absolute inset-0 opacity-60"
                     style={{
@@ -59,7 +61,7 @@ export function SummaryBar({ hero, items, className }: SummaryBarProps) {
             {items.map((item, i) => {
                 const Icon = item.icon
                 return (
-                    <div key={item.label} className="flex items-center">
+                    <div key={item.label} data-testid={item.testId} className="flex items-center">
                         {i > 0 && <div className="w-px self-stretch bg-border my-2.5" />}
                         <div className="flex items-center gap-2.5 px-5 min-w-0">
                             <div className={cn("h-8 w-8 rounded-lg flex items-center justify-center shrink-0", item.iconBgClassName ?? "bg-muted")}>

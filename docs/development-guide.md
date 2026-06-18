@@ -4,19 +4,19 @@
 
 ### Pré-requisitos
 - Node.js 20+
-- Conta no Supabase com projeto criado
+- Banco MySQL/MariaDB acessível (local ou remoto)
 
 ### Variáveis de ambiente
 
 Crie um arquivo `.env.local` na raiz:
 
 ```env
-NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5...
+DATABASE_URL=mysql://user:password@localhost:3306/padel_manager
+JWT_SECRET=<string longa e aleatória>
+NEXT_PUBLIC_APP_URL=http://localhost:3000
 ```
 
-⚠️ `SUPABASE_SERVICE_ROLE_KEY` **nunca** deve ser exposta no cliente.
+⚠️ `JWT_SECRET` **nunca** deve ser exposto no cliente.
 
 ### Instalação e execução
 
@@ -26,6 +26,40 @@ npm run dev
 ```
 
 Acesse `http://localhost:3000`.
+
+---
+
+## Testes
+
+### Unitários (vitest)
+
+```bash
+npm run test          # roda a suíte uma vez
+npm run test:ui       # UI interativa
+npm run test:coverage # com cobertura
+```
+
+### E2E (Playwright)
+
+A suíte E2E roda localmente contra o banco apontado por `DATABASE_URL` — o `global.setup` reseta o schema e roda o seed determinístico antes de cada execução, então **não aponte `DATABASE_URL` para um banco que você queira preservar** ao rodar `npm run e2e`. Configure no `.env.local`:
+
+```env
+E2E_BASE_URL=http://localhost:3100
+```
+
+```bash
+npm run e2e          # roda a suíte completa (sobe o app via webServer automaticamente)
+npm run e2e:ui        # modo interativo do Playwright
+npm run e2e:headed    # com browser visível
+npm run e2e:report    # abre o último relatório HTML
+
+# Apenas os testes críticos (auth, RBAC, multi-tenant, reservas, comandas):
+npx playwright test --project=chromium --grep @p0
+```
+
+A suíte usa um seed determinístico de dois clubes (`prisma/seed-e2e.ts`, contas `*.a@e2e.test` / `*.b@e2e.test`, senha `Test1234!`) e endpoints de teste em `app/api/e2e-only/*` (login direto e probes de autorização), guardados por `E2E_TEST_MODE=1` — inacessíveis fora do ambiente de teste. Note: o gate fica em `E2E_TEST_MODE`, não em `NODE_ENV`, porque `next dev` força `NODE_ENV=development` independente do que é passado.
+
+**Gate de CI**: todo PR roda o workflow `.github/workflows/e2e.yml`. O job `e2e-p0-gate` (testes marcados `@p0`) **bloqueia o merge** se falhar. O job `e2e-full` roda a suíte completa (P1/P2) e reporta falhas sem bloquear.
 
 ---
 
@@ -42,26 +76,26 @@ Acesse `http://localhost:3000`.
 ```typescript
 'use server'
 
-// 1. Sempre assertStaffContext() primeiro
-async function assertStaffContext() { ... }
-
-// 2. Schema Zod para input
+// 1. Schema Zod para input
 const schema = z.object({ ... })
 
-// 3. Action exportada
+// 2. Action exportada
 export async function myAction(formData: FormData) {
-    const { ctx, error } = await assertStaffContext()
-    if (error || !ctx) return { error }
-    
-    const parsed = schema.safeParse(...)
-    if (!parsed.success) return { error: parsed.error.issues[0].message }
-    
-    const service = createServiceClient()
-    const { data, error: dbError } = await service.from('tabela')...
-    if (dbError) return { error: dbError.message }
-    
-    revalidatePath('/caminho')
-    return { data, error: null }
+    try {
+        const user = await requireUser()
+        const ctx = await requireClubContext(user.id)
+
+        const parsed = schema.safeParse(...)
+        if (!parsed.success) return { error: parsed.error.issues[0].message, data: null }
+
+        const data = await prisma.tabela.create({ data: { ...parsed.data, clubId: ctx.clubId } })
+
+        revalidatePath('/caminho')
+        return { data, error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro inesperado'
+        return { data: null, error: message }
+    }
 }
 ```
 
@@ -122,8 +156,7 @@ Variáveis de ambiente devem ser configuradas no painel do Netlify.
 
 ## Notas de TypeScript
 
-- `createServiceClient()` retorna `SupabaseClient` sem tipos gerados — usar `any` com supressão de ESLint quando necessário
-- Supabase retorna joins como arrays em alguns casos — normalizar com: `Array.isArray(m.profile) ? m.profile[0] : m.profile`
+- O cliente Prisma é tipado automaticamente a partir de `prisma/schema.prisma` (gerado em `lib/generated/prisma`) — rodar `npx prisma generate` após alterar o schema
 - Preferir `z.coerce.number()` para campos numéricos vindos de FormData
 
 ---
@@ -132,5 +165,4 @@ Variáveis de ambiente devem ser configuradas no painel do Netlify.
 
 - `window.location.reload()` em alguns handlers de clientes — idealmente substituir por `router.refresh()` do Next.js
 - `comandas-new.ts` é uma versão paralela de `comandas.ts` — consolidar
-- Tipos TypeScript gerados do Supabase não estão configurados — considerar `supabase gen types`
 - Sidebar admin não tem estado ativo para destacar a rota atual

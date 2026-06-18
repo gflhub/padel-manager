@@ -1,6 +1,7 @@
 import { AlertTriangle, OctagonAlert } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import type { ClubTrialStatus } from '@/lib/club-trial'
+import { TESTIDS } from '@/lib/testids'
 
 interface TrialBannerProps {
     status: ClubTrialStatus
@@ -16,6 +17,7 @@ export function TrialBanner({ status, daysRemaining }: TrialBannerProps) {
 
     return (
         <div
+            data-testid={isExpired ? TESTIDS.TRIAL_EXPIRED : undefined}
             className={cn(
                 'flex items-center gap-3 border-b px-4 py-3 text-sm font-medium md:px-6',
                 isExpired

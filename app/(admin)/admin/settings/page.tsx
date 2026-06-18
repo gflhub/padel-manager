@@ -1,11 +1,21 @@
+import { redirect } from "next/navigation"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { getSettings, updateComplexInfo, updateReservationSettings, updatePaymentSettings } from "@/app/actions/settings"
+import { getCurrentUser, requireClubContext } from "@/lib/auth/session"
 
 export default async function AdminSettingsPage() {
+    const user = await getCurrentUser()
+    const context = user?.profileId ? await requireClubContext(user.profileId).catch(() => null) : null
+
+    // Club settings are an owner/manager concern — plain staff fall back to the dashboard.
+    if (!context || context.role === 'STAFF') {
+        redirect('/dashboard')
+    }
+
     const { data: settings } = await getSettings()
 
     const complexInfo = {
