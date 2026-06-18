@@ -8,7 +8,17 @@ import { getInitials, getAvatarColors, formatMemberSince } from "@/lib/format-he
 import { Pencil, UserCheck, MoreHorizontal, Link as LinkIcon, UserPen } from "lucide-react"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
-interface Customer {
+export interface CustomerProfile {
+    id: string
+    name: string
+    email: string
+    phone: string | null
+    cpf: string | null
+    avatar_url: string | null
+    status: string
+}
+
+export interface Customer {
     id: string
     profile_id: string | null
     name: string
@@ -18,14 +28,7 @@ interface Customer {
     notes: string | null
     active: boolean
     joined_at: string
-    profile?: {
-        id: string
-        name: string
-        email: string
-        phone: string | null
-        cpf: string | null
-        avatar_url: string | null
-    } | null
+    profile?: CustomerProfile | null
 }
 
 interface CustomerRowProps {

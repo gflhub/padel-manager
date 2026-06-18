@@ -12,18 +12,19 @@ import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, 
 import { Textarea } from "@/components/ui/textarea"
 import { createCustomer, updateCustomer, toggleCustomerActive, checkCpfStatus } from "@/app/actions/customers"
 import { toast } from "sonner"
-import { Plus, Search, Link as LinkIcon, Users, UserPen, UserPlus } from "lucide-react"
+import { Plus, Search, Link as LinkIcon, Users, UserPen, UserPlus, Loader2, AlertCircle, UserCheck, Lock } from "lucide-react"
 import { SummaryBar } from "@/components/summary-bar"
-import { CustomerRow } from "./customer-row"
+import { CustomerRow, type Customer } from "./customer-row"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
-interface Customer {
+// ─── Tipos auxiliares ─────────────────────────────────────────
+type CpfCheckState = 'idle' | 'checking' | 'not-found' | 'found' | 'member'
+
+interface FoundProfile {
     id: string
-    profile_id: string
-    notes: string | null
-    active: boolean
-    joined_at: string
-    profile: CustomerProfile | null
+    name: string | null
+    email: string
+    status: string | null
 }
 
 // ─── Helpers de formatação ────────────────────────────────────
@@ -42,6 +43,10 @@ function formatPhone(value: string) {
         .replace(/(\d{2})(\d)/, '($1) $2')
         .replace(/(\d{4,5})(\d{4})$/, '$1-$2')
         .slice(0, 15)
+}
+
+function isValidCpf(cpf: string) {
+    return cpf.replace(/\D/g, '').length === 11
 }
 
 export default function CustomersClient({ customers: initialCustomers, isReadOnly = false }: { customers: Customer[]; isReadOnly?: boolean }) {
@@ -506,7 +511,6 @@ export default function CustomersClient({ customers: initialCustomers, isReadOnl
                                     isReadOnly={isReadOnly}
                                     onEdit={(c) => {
                                         setEditingCustomer(c)
-                                        setEditCpf(c.cpf || '')
                                         setEditPhone(c.phone || '')
                                     }}
                                     onToggleActive={handleToggleActive}

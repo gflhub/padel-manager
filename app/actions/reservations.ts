@@ -37,20 +37,6 @@ export async function getReservations(filters?: { date?: string; status?: string
     }
 }
 
-// ─────────────────────────────────────────────────────────────
-// Fluxo secundário assíncrono: garante que o cliente está associado
-// ao clube no momento da reserva. Idempotente — ignoreDuplicates.
-// ─────────────────────────────────────────────────────────────
-async function ensureClubMembership(profileId: string, clubId: string) {
-    const service = createServiceClient()
-    await service
-        .from('club_members')
-        .upsert(
-            { club_id: clubId, profile_id: profileId, active: true },
-            { onConflict: 'club_id,profile_id', ignoreDuplicates: true }
-        )
-}
-
 export async function createReservation(formData: FormData) {
     try {
         const user = await requireUser()

@@ -249,14 +249,11 @@ export async function POST(request: NextRequest) {
       browserInfo: browser_info,
     })
 
-    // Cria issue no Linear se configurado
-    const apiKey = process.env.LINEAR_API_KEY
-    const teamId = process.env.LINEAR_TEAM_ID
-    const projectId = process.env.LINEAR_PROJECT_ID ?? null
+    // Cria issue no GitHub se configurado
+    const ghToken = process.env.GITHUB_TOKEN
+    const ghOrg = process.env.GITHUB_ORG
+    const ghRepo = process.env.GITHUB_REPO
     let linearIssueUrl: string | null = null
-
-    let githubIssueId: string | null = null
-    let githubIssueUrl: string | null = null
 
     if (ghToken && ghOrg && ghRepo) {
       const labels = LABEL_MAP[category ?? 'other'] ?? ['feedback']

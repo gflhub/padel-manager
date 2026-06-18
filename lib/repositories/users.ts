@@ -18,6 +18,7 @@ export interface UserProfile {
   phone: string | null;
   cpf: string | null;
   avatar_url: string | null;
+  status: string;
   created_at: string;
   updated_at: string;
 }
@@ -48,6 +49,7 @@ type PrismaProfile = {
   avatarUrl: string | null;
   createdAt: Date;
   updatedAt: Date;
+  user?: { active: boolean } | null;
 };
 
 function mapProfile(profile: PrismaProfile): UserProfile {
@@ -58,6 +60,7 @@ function mapProfile(profile: PrismaProfile): UserProfile {
     phone: profile.phone,
     cpf: profile.cpf,
     avatar_url: profile.avatarUrl,
+    status: profile.user?.active === false ? 'pre_registered' : 'active',
     created_at: profile.createdAt.toISOString(),
     updated_at: profile.updatedAt.toISOString(),
   };
@@ -110,6 +113,7 @@ export async function getUserProfile(userId: string): Promise<{ data: UserProfil
   try {
     const profile = await prisma.profile.findUnique({
       where: { id: userId },
+      include: { user: true },
     });
 
     if (!profile) return { data: null, error: 'Perfil de usuário não encontrado' };
@@ -141,12 +145,46 @@ export async function updateUserProfile(
         ...(updates.avatar_url !== undefined && { avatarUrl: updates.avatar_url }),
         updatedAt: new Date(),
       },
+      include: { user: true },
     });
 
     return { data: mapProfile(profile), error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao atualizar perfil';
     return { data: null, error: message };
+  }
+}
+
+/**
+ * Check the status of a CPF on the platform.
+ * Looks up a profile by CPF and checks whether it is already a member of the given club.
+ * @param clubId - Club ID
+ * @param cpfRaw - CPF (with or without formatting)
+ * @returns Found profile (if any), whether it's already a member of the club, and error
+ */
+export async function checkCpfStatus(
+  clubId: string,
+  cpfRaw: string
+): Promise<{ data: UserProfile | null; error: string | null; isMember: boolean }> {
+  try {
+    const cpf = cpfRaw.replace(/\D/g, '');
+    if (cpf.length !== 11) return { data: null, error: 'CPF inválido', isMember: false };
+
+    const profile = await prisma.profile.findUnique({
+      where: { cpf },
+      include: { user: true },
+    });
+
+    if (!profile) return { data: null, error: null, isMember: false };
+
+    const existingMember = await prisma.clubStaff.findUnique({
+      where: { profileId_clubId: { profileId: profile.id, clubId } },
+    });
+
+    return { data: mapProfile(profile), error: null, isMember: !!existingMember };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao verificar CPF';
+    return { data: null, error: message, isMember: false };
   }
 }
 
@@ -159,7 +197,7 @@ export async function getClubMembers(clubId: string): Promise<{ data: ClubMember
   try {
     const staffMembers = await prisma.clubStaff.findMany({
       where: { clubId },
-      include: { profile: true },
+      include: { profile: { include: { user: true } } },
       orderBy: { profile: { name: 'asc' } },
     });
 
@@ -174,16 +212,7 @@ export async function getClubMembers(clubId: string): Promise<{ data: ClubMember
       notes: null,
       active: staff.active,
       joined_at: staff.createdAt.toISOString(),
-      profile: {
-        id: staff.profile.id,
-        email: staff.profile.email,
-        name: staff.profile.name,
-        phone: staff.profile.phone,
-        cpf: staff.profile.cpf,
-        avatar_url: staff.profile.avatarUrl,
-        created_at: staff.profile.createdAt.toISOString(),
-        updated_at: staff.profile.updatedAt.toISOString(),
-      },
+      profile: mapProfile(staff.profile),
     }));
 
     return { data: members, error: null };

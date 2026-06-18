@@ -12,7 +12,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { createComanda, addComandaItem, closeComanda, getComandaWithItems, closeMultipleComandas } from "@/app/actions/comandas"
 import { toast } from "sonner"
-import { Plus, Eye, CreditCard } from "lucide-react"
+import { Plus, Eye, CreditCard, CheckSquare, Square } from "lucide-react"
 import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 
 interface Comanda {

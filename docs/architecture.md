@@ -36,10 +36,9 @@ padel-manager/
 │   │
 │   ├── api/
 │   │   ├── admin-setup/       # Rota de setup inicial do admin
-│   │   └── feedback/          # Rota de feedback
+│   │   └── feedback/          # Recebe feedback/bugs do client e cria card na API do Linear
 │   │
 │   ├── auth/
-│   │   ├── callback/          # OAuth callback do Supabase
 │   │   └── auth-code-error/   # Página de erro de auth
 │   │
 │   ├── login/                 # Página de login
@@ -61,10 +60,14 @@ padel-manager/
 │   ├── utils.ts               # cn() helper
 │   ├── get-user-role.ts       # (legado) getClubRole, getClubId
 │   ├── get-club-role.ts       # getClubContext (club_id + role)
-│   └── supabase/
-│       ├── client.ts          # createClient() — browser
-│       ├── server.ts          # createClient() + createServiceClient() — server
-│       └── middleware.ts      # updateSession() — cookies SSR
+│   ├── db/
+│   │   └── prisma.ts          # Cliente Prisma (MySQL/MariaDB)
+│   └── auth/
+│       ├── session.ts         # getCurrentUser, requireUser, requireClubContext, refreshSession
+│       ├── authorization.ts   # requireStaffRole, canManageClubResource, requireGlobalAdmin
+│       ├── tokens.ts           # geração/verificação de access e refresh tokens
+│       ├── jwt.ts              # helpers de assinatura/verificação JWT
+│       └── middleware.ts      # updateSession() — renovação de cookies de sessão
 │
 ├── middleware.ts              # Auth gate global (redireciona para /login)
 ├── components.json            # Configuração do shadcn/ui
@@ -79,7 +82,7 @@ Cada página de admin segue o padrão:
 
 ```
 page.tsx (Server Component)
-  └── Busca dados via Server Actions ou Supabase diretamente
+  └── Busca dados via Server Actions (Prisma)
   └── Passa dados como props para o *-client.tsx
       └── *-client.tsx (Client Component)
             └── Gerencia estado local (useState)
@@ -99,34 +102,36 @@ page.tsx (Server Component)
 Todas as mutações passam por Server Actions (`'use server'`). O padrão é:
 
 ```typescript
-// 1. Verificar sessão e contexto do clube
-async function assertStaffContext() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
-  if (!user) return { ctx: null, error: 'Não autorizado' }
-  const ctx = await getClubContext(user.id)
-  if (!ctx) return { ctx: null, error: 'Sem permissão' }
-  return { ctx: { ...ctx, userId: user.id }, error: null }
+export async function minhaAction(formData: FormData) {
+  try {
+    // 1. Verificar sessão e contexto do clube
+    const user = await requireUser()
+    const ctx = await requireClubContext(user.id)
+
+    // 2. Validar input com Zod
+    const parsed = schema.safeParse({ ... })
+    if (!parsed.success) return { error: parsed.error.issues[0].message, data: null }
+
+    // 3. Executar operação via Prisma, sempre filtrando por clubId
+    const data = await prisma.tabela.create({ data: { ...parsed.data, clubId: ctx.clubId } })
+
+    // 4. Revalidar cache
+    revalidatePath('/caminho')
+
+    // 5. Retornar { data, error }
+    return { data, error: null }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro inesperado'
+    return { data: null, error: message }
+  }
 }
-
-// 2. Validar input com Zod
-const schema = z.object({ ... })
-
-// 3. Executar operação com service client (bypass RLS)
-const service = createServiceClient()
-const { data, error } = await service.from('tabela').insert(...)
-
-// 4. Revalidar cache
-revalidatePath('/caminho')
-
-// 5. Retornar { data, error }
 ```
 
 ## Autenticação e autorização
 
 ```
 Middleware (todo request)
-  └── updateSession() → renova cookies Supabase SSR
+  └── updateSession() → renova cookies de sessão JWT (accessToken/refreshToken)
   └── Se não autenticado → redirect /login
   └── Se /login e já autenticado → signOut + permite acesso à tela
 
@@ -135,14 +140,14 @@ Admin Layout (admin routes)
   └── Se não staff → redirect /
 
 Server Actions
-  └── assertStaffContext() em toda action admin
-  └── Todas queries filtram por club_id do contexto
+  └── requireUser() + requireClubContext(user.id) em toda action admin
+  └── Todas queries filtram por clubId do contexto
 ```
 
-## Clientes Supabase
+## Sessão e acesso a dados
 
-| Cliente | Uso | Acesso |
-|---------|-----|--------|
-| `createClient()` (server) | Leitura autenticada, auth.getUser() | Respeita RLS |
-| `createServiceClient()` | Todas as operações de dados no admin | Bypass RLS via service_role_key |
-| `createClient()` (browser) | Auth no lado do cliente | Respeita RLS |
+| Helper | Uso | Local |
+|--------|-----|-------|
+| `getCurrentUser()` / `requireUser()` | Usuário autenticado via JWT (cookies) | `lib/auth/session.ts` |
+| `requireClubContext(userId)` | `{ clubId, role, userId }` do staff logado | `lib/auth/session.ts` |
+| `prisma` | Todas as operações de dados (server-only) | `lib/db/prisma.ts` |

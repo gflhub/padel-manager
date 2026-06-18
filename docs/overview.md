@@ -18,17 +18,23 @@ Gestores de complexos esportivos precisam centralizar:
 - **Administradores/donos de complexos**: acessam o painel admin para gerir tudo
 - **Clientes (jogadores)**: acessam a área do cliente para criar e ver suas reservas
 
+## Proposta de valor
+
+- **B2B (clubes)**: gestão de quadras, reservas em tempo real, PDV/comandas unificado (tempo de quadra + consumo de bar em uma única conta), pagamentos, controle de clientes e dashboards operacionais.
+- **B2C (jogadores)**: reserva online self-service mobile-first, divisão de valor por jogador (`price_per_player`) e histórico de reservas.
+
 ## Tecnologias principais
 
 | Camada | Tecnologia |
 |--------|-----------|
 | Framework | Next.js 16 (App Router, React 19) |
-| Auth + DB | Supabase (PostgreSQL + Auth) |
+| Auth + DB | Prisma (MySQL/MariaDB) + JWT |
 | UI Components | shadcn/ui (Radix UI + Tailwind CSS v4) |
 | Forms | react-hook-form + Zod |
 | Date handling | date-fns |
 | Charts | recharts |
 | Toasts | sonner |
+| Feedback/Bugs | Linear API (via `/api/feedback`) |
 | Deploy | Netlify |
 
 ## Arquitetura geral
@@ -52,13 +58,13 @@ Gestores de complexos esportivos precisam centralizar:
 │  └──────────────┘                                │
 │                                                  │
 │  ┌──────────────┐      ┌─────────────────────┐  │
-│  │  Middleware  │      │   Supabase SSR      │  │
-│  │  (auth gate) │      │   (cookies/session) │  │
+│  │  Middleware  │      │   Sessão JWT        │  │
+│  │  (auth gate) │      │   (cookies/tokens)  │  │
 │  └──────────────┘      └─────────────────────┘  │
 └─────────────────────────────────────────────────┘
               │
               ▼
-        Supabase (Postgres + Auth)
+        Prisma → MySQL/MariaDB
 ```
 
 ## Multi-tenancy

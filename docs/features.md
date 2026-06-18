@@ -4,9 +4,8 @@
 
 **Fluxo:**
 1. Qualquer rota não-pública redireciona para `/login` via middleware
-2. Login via email/senha ou OAuth (Supabase Auth)
-3. Callback em `/auth/callback` — processa o code do OAuth
-4. Após login, root page (`/`) detecta se o usuário é staff e redireciona:
+2. Login via email/senha — gera `accessToken`/`refreshToken` (JWT) em cookies httpOnly
+3. Após login, root page (`/`) detecta se o usuário é staff e redireciona:
    - Staff → `/dashboard`
    - Cliente → `/home`
 
@@ -59,9 +58,12 @@ Sistema de comanda digital para o bar.
 3. Fecha a comanda com forma de pagamento (PIX, Cartão, Dinheiro)
 
 **Funcionalidades especiais:**
+- Toggle entre **Tabela Clássica** e **Visualização em Cards** (cards mostram cliente, qtd. de itens, data, status com badge colorido)
+- Click no card abre modal com ScrollArea listando os itens, com botões `+`/`-` para editar quantidade e opção de cancelar item, antes de capturar o pagamento de fechamento
 - Seleção múltipla de comandas abertas para fechamento em lote
 - Visualização detalhada dos itens de cada comanda
 - Abas: Abertas / Fechadas
+- Adição rápida de produto: campo de busca com autofocus e pesquisa em tempo real; Enter seleciona o primeiro resultado
 
 ### 2.5 Produtos (`/admin/products`)
 
@@ -135,11 +137,20 @@ Em desenvolvimento / placeholder.
 - Serve para deduplicar clientes que usam o app em múltiplos clubes
 - Um cliente pode ser `pre_registered` em um clube e ter conta ativa em outro
 
-### Service role vs anon key
-- Operações de dados em server actions usam `SUPABASE_SERVICE_ROLE_KEY` (bypass RLS)
-- A autorização é feita no código da action (verificar `club_staff`)
-- Nunca usar service role no cliente/browser
+### Acesso a dados via Prisma
+- Operações de dados em server actions usam `prisma` (`lib/db/prisma.ts`), nunca exposto ao cliente/browser
+- A autorização é feita no código da action (verificar `club_staff` via `requireClubContext()`)
 
 ### Revalidação de cache
 - Toda mutação chama `revalidatePath()` para invalidar o cache do Next.js
 - Algumas páginas fazem `window.location.reload()` para forçar re-fetch após mutações complexas (clientes)
+
+---
+
+## 5. Roadmap / Próximos passos prioritários
+
+1. **Vincular reserva à comanda**: cliente escolhe "Pagar Depois" → cria automaticamente uma comanda vinculada ao seu perfil, inserindo `court_time` como item.
+2. **Gestão de perfil do cliente**: rota `/profile` para o usuário editar seus dados (telefone, etc.) com segurança — CPF permanece imutável.
+3. **Cancelamento pelo cliente**: política parametrizada de auto-cancelamento nas reservas do lado do cliente, com regras de tolerância.
+4. **Relatórios e analytics**: gráficos em `/admin/reports` (Recharts), filtráveis por período.
+5. **Notificações**: job assíncrono para confirmações/alterações de reserva via Resend.

@@ -14,6 +14,17 @@ const memberSchema = z.object({
     notes: z.string().optional().nullable(),
 })
 
+export async function checkCpfStatus(cpf: string) {
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        return userRepo.checkCpfStatus(context.clubId, cpf)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao verificar CPF'
+        return { error: message, data: null, isMember: false }
+    }
+}
+
 export async function getCustomers() {
     try {
         const user = await requireUser()

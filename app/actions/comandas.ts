@@ -111,24 +111,26 @@ export async function closeComanda(id: string, paymentMethod: string) {
 }
 
 export async function closeMultipleComandas(ids: string[], paymentMethod: string) {
-    const { ctx, error: permError } = await assertStaffContext()
-    if (permError || !ctx) return { error: permError ?? 'Erro' }
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
 
-    if (!ids || ids.length === 0) return { error: 'Nenhuma comanda selecionada' }
+        if (!ids || ids.length === 0) return { error: 'Nenhuma comanda selecionada' }
 
-    const service = createServiceClient()
-    const { error } = await service
-        .from('comandas')
-        .update({
-            status: 'closed',
-            closed_at: new Date().toISOString(),
-            closed_by: ctx.userId,
-            notes: paymentMethod ? `Pagamento: ${paymentMethod}` : undefined,
-        })
-        .in('id', ids)
-        .eq('club_id', ctx.clubId)
+        if (!paymentMethod || paymentMethod.trim() === '') {
+            return { error: 'Método de pagamento é obrigatório' }
+        }
 
-    if (error) return { error: error.message }
-    revalidatePath('/admin/comandas')
-    return { error: null }
+        for (const id of ids) {
+            const result = await comandaRepo.closeComanda(id, context.clubId, paymentMethod, context.userId)
+            if (result.error) return { error: result.error }
+        }
+
+        revalidatePath('/admin/comandas')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao fechar comandas'
+        return { error: message }
+    }
 }
