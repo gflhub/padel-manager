@@ -175,6 +175,23 @@ export async function getReservationRevenueByClub(
   return result._sum.totalPrice ? Number(result._sum.totalPrice) : 0
 }
 
+export async function getReservationById(
+  reservationId: string,
+  profileId: string
+): Promise<{ data: Reservation | null; error: string | null }> {
+  try {
+    const reservation = await prisma.reservation.findFirst({
+      where: { id: reservationId, profileId },
+      include: { court: true },
+    })
+    if (!reservation) return { data: null, error: 'Reserva não encontrada' }
+    return { data: mapReservation(reservation), error: null }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao buscar reserva'
+    return { data: null, error: message }
+  }
+}
+
 /**
  * Get user's reservations.
  * @param userId - User ID (profile_id)

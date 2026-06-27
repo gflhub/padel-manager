@@ -1,7 +1,7 @@
+import 'dotenv/config'
 import * as bcrypt from 'bcrypt'
-import { PrismaClient } from '../lib/generated/prisma/client'
-
-const prisma = new PrismaClient({} as any)
+import { prisma } from '../lib/db/prisma'
+import { ProductCategory } from '../lib/generated/prisma/enums'
 
 async function main() {
   const passwordHash = await bcrypt.hash('password123', 10)
@@ -96,13 +96,13 @@ async function main() {
 
   const products = await Promise.all(
     [
-      { name: 'Água Mineral', category: 'BEVERAGE', price: 5.0 },
-      { name: 'Refrigerante', category: 'BEVERAGE', price: 7.5 },
-      { name: 'Sanduíche Natural', category: 'FOOD', price: 18.0 },
-      { name: 'Aluguel de Raquete', category: 'EQUIPMENT', price: 25.0 },
+      { name: 'Água Mineral', category: ProductCategory.bebidas, price: 5.0 },
+      { name: 'Refrigerante', category: ProductCategory.bebidas, price: 7.5 },
+      { name: 'Sanduíche Natural', category: ProductCategory.lanches, price: 18.0 },
+      { name: 'Aluguel de Raquete', category: ProductCategory.outros, price: 25.0 },
     ].map((product) =>
       prisma.product.create({
-        data: { ...product, clubId: club.id } as any,
+        data: { ...product, clubId: club.id },
       })
     )
   )

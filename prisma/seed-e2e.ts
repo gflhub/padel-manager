@@ -9,8 +9,7 @@
  */
 import 'dotenv/config'
 import * as bcrypt from 'bcrypt'
-import { PrismaClient } from '../lib/generated/prisma/client'
-import { PrismaMariaDb } from '@prisma/adapter-mariadb'
+import { prisma } from '../lib/db/prisma'
 import {
   ClubStaffRole,
   CourtStatus,
@@ -19,8 +18,6 @@ import {
   SubscriptionStatus,
 } from '../lib/generated/prisma/enums'
 console.log(process.env.DATABASE_URL) // sanity check to avoid running against prod by accident
-const adapter = new PrismaMariaDb(process.env.DATABASE_URL?.replace('mysql://', 'mariadb://') ?? '')
-const prisma = new PrismaClient({ adapter })
 
 const PASSWORD = 'Test1234!'
 

@@ -19,10 +19,6 @@ const registerReservationPaymentSchema = z.object({
   method: z.string().min(1),
 })
 
-const getCaixaReportSchema = z.object({
-  clubId: z.string().min(1),
-  date: z.string(),
-})
 
 export async function createPayment(formData: FormData) {
   try {
@@ -74,15 +70,12 @@ export async function registerReservationPayment(formData: FormData) {
       return { error: result.error.issues[0].message, data: null }
     }
 
-    const reservationResult = await reservationRepo.getUserReservations(user.profileId ?? '')
+    const reservationResult = await reservationRepo.getReservationById(result.data.reservationId, user.profileId ?? '')
     if (reservationResult.error || !reservationResult.data) {
       return { error: 'Reserva não encontrada', data: null }
     }
 
-    const reservation = reservationResult.data.find(r => r.id === result.data.reservationId)
-    if (!reservation) {
-      return { error: 'Reserva não encontrada', data: null }
-    }
+    const reservation = reservationResult.data
 
     const paymentResult = await paymentRepo.recordPayment(
       reservation.club_id,
@@ -108,15 +101,6 @@ export async function getCaixaReport(date: string) {
   try {
     const user = await requireUser()
     const context = await requireClubContext(user.id)
-
-    const result = getCaixaReportSchema.safeParse({
-      clubId: context.clubId,
-      date,
-    })
-
-    if (!result.success) {
-      return { error: result.error.issues[0].message, data: null }
-    }
 
     const reportResult = await paymentRepo.getCaixaReport(context.clubId, date)
     if (reportResult.error) {

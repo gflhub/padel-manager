@@ -1,5 +1,4 @@
-import { getCurrentUser } from '@/lib/auth/session'
-import { getClubContext } from '@/lib/get-club-role'
+import { getCurrentUser, requireClubContext } from '@/lib/auth/session'
 import { redirect } from 'next/navigation'
 
 export default async function RootPage() {
@@ -9,12 +8,10 @@ export default async function RootPage() {
         redirect('/login')
     }
 
-    // Se for staff de algum clube → área administrativa
-    const clubCtx = await getClubContext(user.profileId)
-    if (clubCtx) {
+    try {
+        await requireClubContext(user.id)
         redirect('/dashboard')
+    } catch {
+        redirect('/home')
     }
-
-    // Caso contrário → área do cliente
-    redirect('/home')
 }

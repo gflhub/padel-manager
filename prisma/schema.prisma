@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
 }
 
 // ============================================================================
@@ -95,7 +95,7 @@ enum SubscriptionStatus {
 
 /// User account with global authentication and role information
 model User {
-  id           String     @id @default(uuid()) @db.VarChar(36)
+  id           String     @id @default(uuid()) @db.Uuid
   email        String     @unique
   passwordHash String
   globalRole   GlobalRole @default(CLIENT)
@@ -117,8 +117,8 @@ model User {
 
 /// User profile with personal information
 model Profile {
-  id        String   @id @default(uuid()) @db.VarChar(36)
-  userId    String   @unique @db.VarChar(36)
+  id        String   @id @default(uuid()) @db.Uuid
+  userId    String   @unique @db.Uuid
   name      String
   email     String
   phone     String?
@@ -138,8 +138,8 @@ model Profile {
 
 /// Session for managing user authentication tokens
 model Session {
-  id               String    @id @default(uuid()) @db.VarChar(36)
-  userId           String    @db.VarChar(36)
+  id               String    @id @default(uuid()) @db.Uuid
+  userId           String    @db.Uuid
   refreshTokenHash String
   expiresAt        DateTime
   revokedAt        DateTime?
@@ -160,7 +160,7 @@ model Session {
 
 /// Club entity for organizing staff and courts
 model Club {
-  id          String   @id @default(uuid()) @db.VarChar(36)
+  id          String   @id @default(uuid()) @db.Uuid
   name        String
   description String?
   active      Boolean  @default(true)
@@ -184,8 +184,8 @@ model Club {
 
 /// Club-wide settings (complex info, reservation policies, payment options)
 model ClubSettings {
-  id                  String   @id @default(uuid()) @db.VarChar(36)
-  clubId              String   @unique @db.VarChar(36)
+  id                  String   @id @default(uuid()) @db.Uuid
+  clubId              String   @unique @db.Uuid
   complexName         String?
   complexAddress      String?
   complexPhone        String?
@@ -195,7 +195,7 @@ model ClubSettings {
   allowPayLater       Boolean  @default(true)
   allowCredits        Boolean  @default(true)
   pixKey              String?
-  updatedBy           String?  @db.VarChar(36)
+  updatedBy           String?  @db.Uuid
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
@@ -206,9 +206,9 @@ model ClubSettings {
 
 /// Staff member role within a specific club
 model ClubStaff {
-  id        String        @id @default(uuid()) @db.VarChar(36)
-  profileId String        @db.VarChar(36)
-  clubId    String        @db.VarChar(36)
+  id        String        @id @default(uuid()) @db.Uuid
+  profileId String        @db.Uuid
+  clubId    String        @db.Uuid
   role      ClubStaffRole
   active    Boolean       @default(true)
   createdAt DateTime      @default(now())
@@ -217,7 +217,7 @@ model ClubStaff {
   profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   club    Club    @relation(fields: [clubId], references: [id], onDelete: Cascade)
   user    User?   @relation(fields: [userId], references: [id])
-  userId  String? @db.VarChar(36)
+  userId  String? @db.Uuid
 
   @@unique([profileId, clubId])
   @@index([clubId])
@@ -230,8 +230,8 @@ model ClubStaff {
 
 /// Court at a club for hosting reservations
 model Court {
-  id           String      @id @default(uuid()) @db.VarChar(36)
-  clubId       String      @db.VarChar(36)
+  id           String      @id @default(uuid()) @db.Uuid
+  clubId       String      @db.Uuid
   name         String
   type         String
   pricePerSlot Decimal     @default(0) @db.Decimal(10, 2)
@@ -249,9 +249,9 @@ model Court {
 
 /// Reservation of a court by a user
 model Reservation {
-  id        String            @id @default(uuid()) @db.VarChar(36)
-  courtId   String            @db.VarChar(36)
-  profileId String            @db.VarChar(36)
+  id        String            @id @default(uuid()) @db.Uuid
+  courtId   String            @db.Uuid
+  profileId String            @db.Uuid
   date      DateTime
   startTime String
   endTime   String
@@ -265,7 +265,7 @@ model Reservation {
   court   Court   @relation(fields: [courtId], references: [id], onDelete: Cascade)
   profile Profile @relation(fields: [profileId], references: [id], onDelete: Cascade)
   user    User?   @relation(fields: [userId], references: [id])
-  userId  String? @db.VarChar(36)
+  userId  String? @db.Uuid
 
   @@index([courtId])
   @@index([profileId])
@@ -279,8 +279,8 @@ model Reservation {
 
 /// Product available for purchase
 model Product {
-  id        String          @id @default(uuid()) @db.VarChar(36)
-  clubId    String          @db.VarChar(36)
+  id        String          @id @default(uuid()) @db.Uuid
+  clubId    String          @db.Uuid
   name      String
   category  ProductCategory
   price     Decimal         @db.Decimal(10, 2)
@@ -299,8 +299,8 @@ model Product {
 
 /// Comanda (order/tab) for tracking purchases
 model Comanda {
-  id           String        @id @default(uuid()) @db.VarChar(36)
-  clubId       String        @db.VarChar(36)
+  id           String        @id @default(uuid()) @db.Uuid
+  clubId       String        @db.Uuid
   number       Int
   customerName String?       @db.VarChar(255)
   status       ComandaStatus @default(OPEN)
@@ -319,9 +319,9 @@ model Comanda {
 
 /// Item within a comanda
 model ComandaItem {
-  id        String   @id @default(uuid()) @db.VarChar(36)
-  comandaId String   @db.VarChar(36)
-  productId String?  @db.VarChar(36)
+  id        String   @id @default(uuid()) @db.Uuid
+  comandaId String   @db.Uuid
+  productId String?  @db.Uuid
   name      String?
   quantity  Int
   unitPrice Decimal  @db.Decimal(10, 2)
@@ -342,8 +342,8 @@ model ComandaItem {
 
 /// Payment transaction for a comanda
 model Payment {
-  id        String        @id @default(uuid()) @db.VarChar(36)
-  comandaId String        @db.VarChar(36)
+  id        String        @id @default(uuid()) @db.Uuid
+  comandaId String        @db.Uuid
   method    PaymentMethod
   amount    Decimal       @db.Decimal(10, 2)
   paidAt    DateTime      @default(now())
@@ -362,8 +362,8 @@ model Payment {
 
 /// Tournament event at a club
 model Tournament {
-  id              String           @id @default(uuid()) @db.VarChar(36)
-  clubId          String           @db.VarChar(36)
+  id              String           @id @default(uuid()) @db.Uuid
+  clubId          String           @db.Uuid
   name            String
   description     String?
   startDate       DateTime
@@ -371,7 +371,7 @@ model Tournament {
   maxParticipants Int
   entryFee        Decimal?         @db.Decimal(10, 2)
   status          TournamentStatus @default(DRAFT)
-  createdBy       String           @db.VarChar(36)
+  createdBy       String           @db.Uuid
   createdAt       DateTime         @default(now())
   updatedAt       DateTime         @updatedAt
 
@@ -385,9 +385,9 @@ model Tournament {
 
 /// Registration of a user in a tournament
 model TournamentRegistration {
-  id           String             @id @default(uuid()) @db.VarChar(36)
-  tournamentId String             @db.VarChar(36)
-  userId       String             @db.VarChar(36)
+  id           String             @id @default(uuid()) @db.Uuid
+  tournamentId String             @db.Uuid
+  userId       String             @db.Uuid
   registeredAt DateTime           @default(now())
   cancelledAt  DateTime?
   status       RegistrationStatus @default(PENDING)
@@ -407,9 +407,9 @@ model TournamentRegistration {
 
 /// Monthly-member subscription plan for a user at a club
 model Subscription {
-  id          String             @id @default(uuid()) @db.VarChar(36)
-  userId      String             @db.VarChar(36)
-  clubId      String             @db.VarChar(36)
+  id          String             @id @default(uuid()) @db.Uuid
+  userId      String             @db.Uuid
+  clubId      String             @db.Uuid
   planName    String
   price       Decimal            @db.Decimal(10, 2)
   dueDay      Int

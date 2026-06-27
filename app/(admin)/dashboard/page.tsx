@@ -5,8 +5,7 @@ import { TonalBadge, type TonalColor } from "@/components/ui/tonal-badge"
 import { SummaryBar } from "@/components/summary-bar"
 import { DollarSign, CalendarCheck, Activity, Receipt } from "lucide-react"
 import { prisma } from '@/lib/db/prisma'
-import { getClubContext } from '@/lib/get-club-role'
-import { getCurrentUser } from '@/lib/auth/session'
+import { getCurrentUser, requireClubContext } from '@/lib/auth/session'
 import { getInitials, getAvatarColors, formatHumanDateTime } from '@/lib/format-helpers'
 import { getComandaRevenueByClub } from '@/lib/repositories/payments'
 import { getReservationRevenueByClub } from '@/lib/repositories/reservations'
@@ -66,7 +65,7 @@ function ReservationRow({ r }: { r: Reservation }) {
 
 export default async function AdminDashboard() {
     const user = await getCurrentUser()
-    const ctx = user?.profileId ? await getClubContext(user.profileId) : null
+    const ctx = user ? await requireClubContext(user.id).catch(() => null) : null
     const clubId = ctx?.clubId
 
     const today = new Date()

@@ -11,7 +11,7 @@ import { TrialBanner } from '@/components/trial-banner'
 import { getClubTrialStatus, sendTrialWarningEmailIfNeeded } from '@/lib/club-trial'
 import { sendSubscriptionDueWarnings } from '@/lib/subscription-notifications'
 import { getCurrentUser } from '@/lib/auth/session'
-import { requireStaffRole, requireGlobalAdmin } from '@/lib/auth/authorization'
+import { requireGlobalAdmin } from '@/lib/auth/authorization'
 import { TESTIDS } from '@/lib/testids'
 
 const NAV_TESTIDS: Record<string, string> = {
@@ -52,8 +52,7 @@ export default async function AdminLayout({
         redirect('/onboarding')
     }
 
-    const isStaff = await requireStaffRole(user.profileId, ['OWNER', 'MANAGER', 'STAFF'])
-    if (!isStaff) {
+    if (!['OWNER', 'MANAGER', 'STAFF'].includes(staff.role)) {
         redirect('/')
     }
 
