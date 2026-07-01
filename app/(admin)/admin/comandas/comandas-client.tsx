@@ -19,6 +19,7 @@ import { TESTIDS } from "@/lib/testids"
 interface Comanda {
     id: string
     customer_name: string
+    customerProfileId?: string | null
     status: string
     items_count: number
     total_amount: number
@@ -46,6 +47,8 @@ export default function AdminComandasClient({ comandas: initialComandas, product
     const [openClose, setOpenClose] = useState(false)
     const [openCloseMultiple, setOpenCloseMultiple] = useState(false)
     const [selectedPayment, setSelectedPayment] = useState('pix')
+    // per-comanda payment method for the day-close modal ('receivable' = A receber)
+    const [itemPayments, setItemPayments] = useState<Record<string, string>>({})
     const [loading, setLoading] = useState(false)
     const [selectedIds, setSelectedIds] = useState<string[]>([])
 
@@ -109,10 +112,21 @@ export default function AdminComandasClient({ comandas: initialComandas, product
         setLoading(false)
     }
 
+    const handleOpenCloseMultiple = () => {
+        const initial: Record<string, string> = {}
+        selectedIds.forEach(id => { initial[id] = 'pix' })
+        setItemPayments(initial)
+        setOpenCloseMultiple(true)
+    }
+
     const handleCloseMultiple = async () => {
         if (selectedIds.length === 0) return
         setLoading(true)
-        const result = await closeMultipleComandas(selectedIds, selectedPayment)
+        const items = selectedIds.map(id => ({
+            id,
+            paymentMethod: itemPayments[id] === 'receivable' ? undefined : itemPayments[id],
+        }))
+        const result = await closeMultipleComandas(items)
         if (result.error) {
             toast.error(result.error)
         } else {
@@ -174,6 +188,16 @@ export default function AdminComandasClient({ comandas: initialComandas, product
                     <TabsTrigger value="closed">Fechadas ({closedComandas.length})</TabsTrigger>
                 </TabsList>
                 <TabsContent value="open">
+                    {selectedIds.length > 0 && (
+                        <div className="flex items-center justify-between mb-3 p-3 bg-muted rounded-lg">
+                            <span className="text-sm font-medium">
+                                {selectedIds.length} comanda(s) selecionada(s) — {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedTotal)}
+                            </span>
+                            <Button size="sm" onClick={handleOpenCloseMultiple} disabled={isReadOnly} title={isReadOnly ? TRIAL_EXPIRED_TOOLTIP : undefined}>
+                                Fechar Selecionadas
+                            </Button>
+                        </div>
+                    )}
                     <Card><CardContent className="pt-6">
                         <Table>
                             <TableHeader>
@@ -311,22 +335,41 @@ export default function AdminComandasClient({ comandas: initialComandas, product
 
             {/* Close Multiple Comandas Dialog */}
             <Dialog open={openCloseMultiple} onOpenChange={setOpenCloseMultiple}>
-                <DialogContent>
-                    <DialogHeader><DialogTitle>Fechar {selectedIds.length} Comandas</DialogTitle><DialogDescription>Total acumulado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedTotal)}</DialogDescription></DialogHeader>
-                    <div className="space-y-4">
-                        <div className="space-y-2">
-                            <Label>Forma de Pagamento (Geral)</Label>
-                            <Select value={selectedPayment} onValueChange={setSelectedPayment}>
-                                <SelectTrigger><SelectValue /></SelectTrigger>
-                                <SelectContent>
-                                    <SelectItem value="pix">PIX</SelectItem>
-                                    <SelectItem value="card">Cartão</SelectItem>
-                                    <SelectItem value="cash">Dinheiro</SelectItem>
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <DialogFooter><Button onClick={handleCloseMultiple} disabled={loading}>{loading ? 'Fechando...' : 'Confirmar Pagamento Geral'}</Button></DialogFooter>
+                <DialogContent className="max-w-lg">
+                    <DialogHeader>
+                        <DialogTitle>Fechar {selectedIds.length} Comandas</DialogTitle>
+                        <DialogDescription>Total acumulado: {new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(selectedTotal)}</DialogDescription>
+                    </DialogHeader>
+                    <div className="space-y-3 max-h-[60vh] overflow-y-auto">
+                        {openComandas.filter(c => selectedIds.includes(c.id)).map(c => {
+                            const canReceivable = !!c.customerProfileId
+                            return (
+                                <div key={c.id} className="flex items-center gap-3 p-2 rounded border">
+                                    <div className="flex-1 min-w-0">
+                                        <div className="font-medium truncate">{c.customer_name}</div>
+                                        <div className="text-sm text-muted-foreground">{new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(c.total_amount)}</div>
+                                    </div>
+                                    <Select
+                                        value={itemPayments[c.id] ?? 'pix'}
+                                        onValueChange={v => setItemPayments(prev => ({ ...prev, [c.id]: v }))}
+                                    >
+                                        <SelectTrigger className="w-36"><SelectValue /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="pix">PIX</SelectItem>
+                                            <SelectItem value="card">Cartão</SelectItem>
+                                            <SelectItem value="cash">Dinheiro</SelectItem>
+                                            <SelectItem value="receivable" disabled={!canReceivable} title={!canReceivable ? 'Vincule um cliente para usar A receber' : undefined}>
+                                                A receber
+                                            </SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )
+                        })}
                     </div>
+                    <DialogFooter>
+                        <Button onClick={handleCloseMultiple} disabled={loading}>{loading ? 'Fechando...' : 'Confirmar'}</Button>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>

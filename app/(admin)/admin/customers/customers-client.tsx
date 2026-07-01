@@ -218,7 +218,7 @@ export default function CustomersClient({ customers: initialCustomers, isReadOnl
     }
 
     const fieldsLocked = cpfCheckState === 'idle' || cpfCheckState === 'checking' || cpfCheckState === 'member'
-    const isPreRegistered = (c: Customer) => c.profile?.status === 'pre_registered'
+    const isPreRegistered = (c: Customer | null) => c?.profile?.status === 'pre_registered'
 
     return (
         <div className="space-y-6">
@@ -527,7 +527,7 @@ export default function CustomersClient({ customers: initialCustomers, isReadOnl
                     <DialogHeader>
                         <DialogTitle>Editar Vínculo de Cliente</DialogTitle>
                         <DialogDescription>
-                            {isPreRegistered(editingCustomer!)
+                            {isPreRegistered(editingCustomer)
                                 ? 'Conta pré-cadastrada. Você pode editar nome, e-mail e telefone. CPF é imutável.'
                                 : 'Este cliente possui conta ativa. Apenas observações internas podem ser editadas pelo clube.'}
                         </DialogDescription>

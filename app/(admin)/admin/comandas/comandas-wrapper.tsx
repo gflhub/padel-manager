@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
@@ -8,6 +8,7 @@ import { Input } from "@/components/ui/input"
 import { Plus, LayoutGrid, Table, Wallet, Receipt, TrendingUp, Beer } from "lucide-react"
 import { createComanda } from "@/app/actions/comandas"
 import { toast } from "sonner"
+import { CustomerCombobox } from "@/components/customer-combobox"
 import ComandasCards from "./comandas-cards"
 import AdminComandasClient from "./comandas-client"
 import { SummaryBar } from "@/components/summary-bar"
@@ -16,6 +17,7 @@ import { TRIAL_EXPIRED_TOOLTIP } from "@/lib/trial-constants"
 interface Comanda {
     id: string
     customer_name: string
+    customerProfileId: string | null
     status: string
     items_count: number
     total_amount: number
@@ -41,7 +43,13 @@ interface Product {
 export default function ComandasWrapper({ comandas: initialComandas, products, isReadOnly = false }: { comandas: Comanda[]; products: Product[]; isReadOnly?: boolean }) {
     const [comandas, setComandas] = useState(initialComandas)
     const [openCreate, setOpenCreate] = useState(false)
+
+    useEffect(() => {
+        setComandas(initialComandas)
+    }, [initialComandas])
     const [loading, setLoading] = useState(false)
+    const [createCustomerId, setCreateCustomerId] = useState<string | null>(null)
+    const [createCustomerName, setCreateCustomerName] = useState('')
     const [viewMode, setViewMode] = useState<'cards' | 'table'>('cards')
 
     const openComandas = comandas.filter(c => c.status === 'open')
@@ -58,12 +66,18 @@ export default function ComandasWrapper({ comandas: initialComandas, products, i
         const form = e.currentTarget
         setLoading(true)
         const formData = new FormData(form)
+        if (createCustomerId) {
+            formData.set('customer_name', createCustomerName)
+            formData.set('customer_profile_id', createCustomerId)
+        }
         const result = await createComanda(formData)
         if (result.error) {
             toast.error(result.error)
         } else {
             toast.success('Comanda aberta!')
             setOpenCreate(false)
+            setCreateCustomerId(null)
+            setCreateCustomerName('')
             if (result.data) setComandas(prev => [result.data as Comanda, ...prev])
             form.reset()
         }
@@ -110,9 +124,18 @@ export default function ComandasWrapper({ comandas: initialComandas, products, i
                             </DialogHeader>
                             <form onSubmit={handleCreate} className="space-y-4">
                                 <div className="space-y-2">
-                                    <Label htmlFor="customer_name">Nome do Cliente</Label>
-                                    <Input id="customer_name" name="customer_name" required />
+                                    <Label>Cliente</Label>
+                                    <CustomerCombobox
+                                        value={createCustomerId}
+                                        onChange={(id, name) => { setCreateCustomerId(id); setCreateCustomerName(name) }}
+                                    />
                                 </div>
+                                {createCustomerId === null && (
+                                    <div className="space-y-2">
+                                        <Label htmlFor="customer_name">Nome (walk-in)</Label>
+                                        <Input id="customer_name" name="customer_name" placeholder="Nome do cliente" />
+                                    </div>
+                                )}
                                 <div className="space-y-2">
                                     <Label htmlFor="customer_phone">Telefone</Label>
                                     <Input id="customer_phone" name="customer_phone" />

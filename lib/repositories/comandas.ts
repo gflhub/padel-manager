@@ -13,6 +13,7 @@ import { PaymentMethod } from '@/lib/generated/prisma/enums';
 export interface Comanda {
   id: string;
   customer_name: string;
+  customerProfileId: string | null;
   status: 'open' | 'closed' | 'cancelled';
   items_count: number;
   total_amount: number;
@@ -58,6 +59,7 @@ export async function getComandasByClub(
     const normalized: Comanda[] = comandas.map((c) => ({
       id: c.id,
       customer_name: c.customerName ?? '',
+      customerProfileId: c.customerProfileId,
       status: c.status.toLowerCase() as Comanda['status'],
       items_count: c.items.length,
       total_amount: Number(c.total),
@@ -99,6 +101,7 @@ export async function getComandaWithItems(
     const result: ComandaWithItems = {
       id: comanda.id,
       customer_name: comanda.customerName ?? '',
+      customerProfileId: comanda.customerProfileId,
       status: comanda.status.toLowerCase() as Comanda['status'],
       items_count: comanda.items.length,
       total_amount: Number(comanda.total),
@@ -136,7 +139,8 @@ export async function createComanda(
   clubId: string,
   customerName: string,
   userId: string,
-  notes?: string
+  notes?: string,
+  customerProfileId?: string | null
 ): Promise<{ data: Comanda | null; error: string | null }> {
   try {
     if (!customerName?.trim()) {
@@ -156,6 +160,7 @@ export async function createComanda(
         clubId,
         number: nextNumber,
         customerName: customerName.trim(),
+        customerProfileId: customerProfileId ?? null,
         total: 0,
       },
     });
@@ -164,6 +169,7 @@ export async function createComanda(
       data: {
         id: comanda.id,
         customer_name: comanda.customerName ?? '',
+        customerProfileId: comanda.customerProfileId,
         status: comanda.status.toLowerCase() as Comanda['status'],
         items_count: 0,
         total_amount: Number(comanda.total),
@@ -174,6 +180,47 @@ export async function createComanda(
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao criar comanda';
     return { data: null, error: message };
+  }
+}
+
+export async function searchClubCustomers(
+  clubId: string,
+  query: string
+): Promise<{ data: { id: string; name: string }[] | null; error: string | null }> {
+  if (query.trim().length < 2) return { data: [], error: null };
+  try {
+    const profiles = await prisma.profile.findMany({
+      where: {
+        name: { contains: query, mode: 'insensitive' },
+      },
+      select: { id: true, name: true },
+      take: 20,
+      orderBy: { name: 'asc' },
+    });
+    return { data: profiles, error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao buscar clientes';
+    return { data: null, error: message };
+  }
+}
+
+export async function associateCustomerToComanda(
+  comandaId: string,
+  customerProfileId: string,
+  clubId: string
+): Promise<{ error: string | null }> {
+  try {
+    const comanda = await prisma.comanda.findFirst({ where: { id: comandaId, clubId } });
+    if (!comanda) return { error: 'Comanda não encontrada' };
+    if (comanda.customerProfileId !== null) return { error: 'Comanda já vinculada a um cliente' };
+    await prisma.comanda.update({
+      where: { id: comandaId },
+      data: { customerProfileId },
+    });
+    return { error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao vincular cliente';
+    return { error: message };
   }
 }
 
@@ -286,24 +333,20 @@ export async function updateComandaItemQuantity(itemId: string, newQuantity: num
 }
 
 /**
- * Close/finalize a comanda with payment.
+ * Close/finalize a comanda.
  * @param comandaId - Comanda ID
  * @param clubId - Club ID (for authorization)
- * @param paymentMethod - Payment method
  * @param userId - User ID (closed_by)
+ * @param paymentMethod - Payment method (omit to mark as receivable)
  * @returns Error or null
  */
 export async function closeComanda(
   comandaId: string,
   clubId: string,
-  paymentMethod: string,
-  userId: string
+  userId: string,
+  paymentMethod?: string
 ): Promise<{ error: string | null }> {
   try {
-    if (!paymentMethod?.trim()) {
-      return { error: 'Método de pagamento é obrigatório' };
-    }
-
     const comanda = await prisma.comanda.findUnique({
       where: { id: comandaId },
     });
@@ -316,28 +359,101 @@ export async function closeComanda(
       return { error: 'Comanda já está fechada' };
     }
 
-    // Create payment record and close comanda in transaction
-    await prisma.$transaction([
-      prisma.payment.create({
-        data: {
-          comandaId: comandaId,
-          method: paymentMethod.trim().toUpperCase() as PaymentMethod,
-          amount: comanda.total,
-          paidAt: new Date(),
-        },
-      }),
-      prisma.comanda.update({
+    if (!paymentMethod) {
+      // RECEIVABLE path: requires linked customer
+      if (!comanda.customerProfileId) {
+        return { error: 'Comanda avulsa não pode ficar como receber — selecione um cliente ou informe o pagamento' };
+      }
+      await prisma.comanda.update({
         where: { id: comandaId },
-        data: {
-          status: 'CLOSED',
-          updatedAt: new Date(),
-        },
-      }),
-    ]);
+        data: { status: 'CLOSED', paymentStatus: 'RECEIVABLE', updatedAt: new Date() },
+      });
+    } else {
+      // PAID path: create Payment + close
+      await prisma.$transaction([
+        prisma.payment.create({
+          data: {
+            comandaId,
+            method: paymentMethod.trim().toUpperCase() as PaymentMethod,
+            amount: comanda.total,
+            paidAt: new Date(),
+          },
+        }),
+        prisma.comanda.update({
+          where: { id: comandaId },
+          data: { status: 'CLOSED', paymentStatus: 'PAID', updatedAt: new Date() },
+        }),
+      ]);
+    }
 
     return { error: null };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Erro ao fechar comanda';
+    return { error: message };
+  }
+}
+
+/**
+ * Close multiple comandas in a single atomic transaction.
+ * Each item can be paid (paymentMethod present) or receivable (paymentMethod absent).
+ * @param clubId - Club ID
+ * @param userId - User ID
+ * @param items - Array of { comandaId, paymentMethod? }
+ * @returns Error or null
+ */
+export async function closeDayComandas(
+  clubId: string,
+  _userId: string,
+  items: { comandaId: string; paymentMethod?: string }[]
+): Promise<{ error: string | null }> {
+  try {
+    const comandas = await prisma.comanda.findMany({
+      where: { id: { in: items.map((i) => i.comandaId) } },
+    });
+
+    for (const item of items) {
+      const comanda = comandas.find((c) => c.id === item.comandaId);
+      if (!comanda || comanda.clubId !== clubId) {
+        return { error: 'Comanda não encontrada' };
+      }
+      if (comanda.status !== 'OPEN') {
+        return { error: 'Comanda já está fechada' };
+      }
+      if (!item.paymentMethod && !comanda.customerProfileId) {
+        return { error: 'Comanda avulsa não pode ficar como receber — selecione um cliente ou informe o pagamento' };
+      }
+    }
+
+    const ops = items.flatMap((item) => {
+      const comanda = comandas.find((c) => c.id === item.comandaId)!;
+      if (item.paymentMethod) {
+        return [
+          prisma.payment.create({
+            data: {
+              comandaId: item.comandaId,
+              method: item.paymentMethod.trim().toUpperCase() as PaymentMethod,
+              amount: comanda.total,
+              paidAt: new Date(),
+            },
+          }),
+          prisma.comanda.update({
+            where: { id: item.comandaId },
+            data: { status: 'CLOSED', paymentStatus: 'PAID', updatedAt: new Date() },
+          }),
+        ];
+      }
+      return [
+        prisma.comanda.update({
+          where: { id: item.comandaId },
+          data: { status: 'CLOSED', paymentStatus: 'RECEIVABLE', updatedAt: new Date() },
+        }),
+      ];
+    });
+
+    await prisma.$transaction(ops);
+    return { error: null };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Erro ao fechar comandas';
     return { error: message };
   }
 }

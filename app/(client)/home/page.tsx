@@ -78,10 +78,10 @@ export default async function ClientHomePage() {
                                         </Badge>
                                     </div>
                                     <CardDescription className="flex flex-col gap-2 text-sm">
-                                        <div className="flex items-center gap-2">
+                                        <span className="flex items-center gap-2">
                                             <Clock className="h-4 w-4 text-muted-foreground" />
                                             <span>{court.duration_slot} minutos por horário</span>
-                                        </div>
+                                        </span>
                                     </CardDescription>
                                 </CardHeader>
                                 <CardContent className="pb-4">

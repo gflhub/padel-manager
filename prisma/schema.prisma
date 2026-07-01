@@ -7,7 +7,7 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
+  provider  = "postgresql"
 }
 
 // ============================================================================
@@ -89,6 +89,12 @@ enum SubscriptionStatus {
   CANCELLED
 }
 
+/// Payment status for a closed comanda
+enum ComandaPaymentStatus {
+  PAID
+  RECEIVABLE
+}
+
 // ============================================================================
 // CORE AUTH MODELS
 // ============================================================================
@@ -131,6 +137,9 @@ model Profile {
   user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   clubStaff    ClubStaff[]
   reservations Reservation[]
+  comandasAsCustomer    Comanda[]    @relation("ComandaCustomer")
+  settlementsAsCustomer Settlement[] @relation("CustomerSettlements")
+  settlementsAsStaff    Settlement[] @relation("StaffSettlements")
 
   @@index([userId])
   @@index([email])
@@ -171,13 +180,14 @@ model Club {
   trialEndsAt             DateTime?
   trialWarningEmailSentAt DateTime?
 
-  staff       ClubStaff[]
-  courts      Court[]
-  products    Product[]
-  comandas    Comanda[]
-  tournaments Tournament[]
-  settings    ClubSettings?
+  staff         ClubStaff[]
+  courts        Court[]
+  products      Product[]
+  comandas      Comanda[]
+  tournaments   Tournament[]
+  settings      ClubSettings?
   subscriptions Subscription[]
+  settlements   Settlement[]
 
   @@index([active])
 }
@@ -299,22 +309,29 @@ model Product {
 
 /// Comanda (order/tab) for tracking purchases
 model Comanda {
-  id           String        @id @default(uuid()) @db.Uuid
-  clubId       String        @db.Uuid
-  number       Int
-  customerName String?       @db.VarChar(255)
-  status       ComandaStatus @default(OPEN)
-  total        Decimal       @default(0) @db.Decimal(10, 2)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  id                String               @id @default(uuid()) @db.Uuid
+  clubId            String               @db.Uuid
+  number            Int
+  customerName      String?              @db.VarChar(255)
+  customerProfileId String?              @db.Uuid
+  paymentStatus     ComandaPaymentStatus?
+  settlementId      String?              @db.Uuid
+  status            ComandaStatus        @default(OPEN)
+  total             Decimal              @default(0) @db.Decimal(10, 2)
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
 
-  club     Club          @relation(fields: [clubId], references: [id], onDelete: Cascade)
-  items    ComandaItem[]
-  payments Payment[]
+  club            Club        @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  items           ComandaItem[]
+  payments        Payment[]
+  customerProfile Profile?    @relation("ComandaCustomer", fields: [customerProfileId], references: [id], onDelete: SetNull)
+  settlement      Settlement? @relation(fields: [settlementId], references: [id], onDelete: SetNull)
 
   @@unique([clubId, number])
   @@index([clubId])
   @@index([status])
+  @@index([clubId, paymentStatus])
+  @@index([customerProfileId])
 }
 
 /// Item within a comanda
@@ -354,6 +371,32 @@ model Payment {
 
   @@index([comandaId])
   @@index([paidAt])
+}
+
+// ============================================================================
+// SETTLEMENT MODELS
+// ============================================================================
+
+/// Settlement record when a customer pays off their receivable comandas
+model Settlement {
+  id                String        @id @default(uuid()) @db.Uuid
+  clubId            String        @db.Uuid
+  customerProfileId String        @db.Uuid
+  totalAmount       Decimal       @db.Decimal(10, 2)
+  method            PaymentMethod
+  comandasCount     Int
+  settledAt         DateTime      @default(now())
+  settledBy         String        @db.Uuid
+  invoiceIssued     Boolean       @default(false)
+  createdAt         DateTime      @default(now())
+
+  club             Club       @relation(fields: [clubId], references: [id], onDelete: Cascade)
+  customerProfile  Profile    @relation("CustomerSettlements", fields: [customerProfileId], references: [id], onDelete: Restrict)
+  settledByProfile Profile    @relation("StaffSettlements", fields: [settledBy], references: [id], onDelete: Restrict)
+  comandas         Comanda[]
+
+  @@index([clubId])
+  @@index([clubId, customerProfileId])
 }
 
 // ============================================================================

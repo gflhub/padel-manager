@@ -154,6 +154,84 @@ async function buildClub(opts: {
   return { club, admin, staff, client, courts }
 }
 
+// Seed receivables test data for both clubs.
+// Creates a customer profile with 3 RECEIVABLE + 1 PAID comanda for Clube A,
+// 1 ad-hoc RECEIVABLE (no customerProfileId) for Clube A, and 1 RECEIVABLE for Clube B.
+async function seedReceivables(clubAId: string, clubBId: string) {
+  // Task 1.1: Profile (customer) linked to Clube A
+  const customerA = await createUser('customer.receivable.a@e2e.test', 'Cliente Recebível A')
+
+  // Task 1.2: 3 RECEIVABLE Comanda records for that customer
+  for (let i = 0; i < 3; i++) {
+    await prisma.comanda.create({
+      data: {
+        clubId: clubAId,
+        number: 101 + i,
+        customerName: 'Cliente Recebível A',
+        customerProfileId: customerA.profile!.id,
+        status: 'CLOSED',
+        paymentStatus: 'RECEIVABLE',
+        total: 1000,
+      },
+    })
+  }
+
+  // Task 1.3: 1 PAID Comanda for same customer (should NOT appear in receivables)
+  const paidComanda = await prisma.comanda.create({
+    data: {
+      clubId: clubAId,
+      number: 104,
+      customerName: 'Cliente Recebível A',
+      customerProfileId: customerA.profile!.id,
+      status: 'CLOSED',
+      paymentStatus: 'PAID',
+      total: 2000,
+    },
+  })
+  await prisma.payment.create({
+    data: { comandaId: paidComanda.id, method: 'CASH', amount: 2000, paidAt: new Date() },
+  })
+
+  // Task 1.4: 1 ad-hoc RECEIVABLE (no customerProfileId) — excluded from /admin/receivables
+  await prisma.comanda.create({
+    data: {
+      clubId: clubAId,
+      number: 105,
+      customerName: 'Avulso Recebível',
+      customerProfileId: null,
+      status: 'CLOSED',
+      paymentStatus: 'RECEIVABLE',
+      total: 500,
+    },
+  })
+
+  // Task 1.5: 1 RECEIVABLE Comanda for Clube B customer (multi-tenant isolation check)
+  const customerB = await createUser('customer.receivable.b@e2e.test', 'Cliente Recebível B')
+  await prisma.comanda.create({
+    data: {
+      clubId: clubBId,
+      number: 101,
+      customerName: 'Cliente Recebível B',
+      customerProfileId: customerB.profile!.id,
+      status: 'CLOSED',
+      paymentStatus: 'RECEIVABLE',
+      total: 1000,
+    },
+  })
+
+  // Dedicated OPEN comanda for E2E backward-compat test (REC-06):
+  // closed with a paymentMethod → must NOT appear in /admin/receivables.
+  await prisma.comanda.create({
+    data: {
+      clubId: clubAId,
+      number: 106,
+      customerName: 'Fechamento Compatibilidade',
+      status: 'OPEN',
+      total: 100,
+    },
+  })
+}
+
 async function main() {
   const { club: clubA } = await buildClub({
     suffix: 'a',
@@ -164,7 +242,7 @@ async function main() {
     members: [{ status: SubscriptionStatus.ACTIVE }, { status: SubscriptionStatus.OVERDUE }],
   })
 
-  await buildClub({
+  const { club: clubB } = await buildClub({
     suffix: 'b',
     name: 'Clube B',
     courtCount: 2,
@@ -184,6 +262,8 @@ async function main() {
       data: { profileId: sessionUser.profile!.id, clubId: clubA.id, role: ClubStaffRole.STAFF, userId: sessionUser.id },
     })
   }
+
+  await seedReceivables(clubA.id, clubB.id)
 
   console.log('[e2e] two-clubs seed concluído.')
 }
