@@ -167,16 +167,6 @@ export default function LoginPage() {
                             {isSignUp ? 'Já tem uma conta? Entrar' : 'Não tem conta? Criar agora'}
                         </button>
                     </div>
-
-                    {!isSignUp && (
-                        <div className="mt-6 p-4 bg-muted rounded-lg">
-                            <p className="text-xs text-slate-600 text-center mb-2 font-medium">Contas de Teste:</p>
-                            <div className="space-y-1 text-xs text-slate-600">
-                                <p><strong>Admin:</strong> admin@padelmanager.com</p>
-                                <p><strong>Senha:</strong> adm@padel2026</p>
-                            </div>
-                        </div>
-                    )}
                 </CardContent>
             </Card>
         </div>
