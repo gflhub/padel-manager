@@ -4,7 +4,7 @@ import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
-import { LayoutDashboard, Calendar, Users, Settings, Trophy, Receipt, ShoppingBag, Home, User, UserRound, Building2 } from 'lucide-react'
+import { LayoutDashboard, Calendar, Users, Settings, Trophy, Receipt, ShoppingBag, Home, User, UserRound, Building2, Wallet } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { LogoutMenuItem } from '@/components/logout-menu-item'
 import { TrialBanner } from '@/components/trial-banner'
@@ -84,6 +84,7 @@ export default async function AdminLayout({
         { icon: LayoutDashboard, label: 'Dashboard', href: '/dashboard' },
         { icon: Calendar, label: 'Reservas', href: '/admin/reservations' },
         { icon: Receipt, label: 'Comandas', href: '/admin/comandas' },
+        { icon: Wallet, label: 'Contas a Receber', href: '/admin/receivables' },
         { icon: Trophy, label: 'Quadras', href: '/admin/courts' },
         { icon: ShoppingBag, label: 'Produtos', href: '/admin/products' },
         { icon: UserRound, label: 'Clientes', href: '/admin/customers' },

@@ -20,6 +20,6 @@ export default defineConfig({
     seed: seedCommand,
   },
   datasource: {
-    url: process.env["DATABASE_URL"],
+    url: process.env["DIRECT_URL"],
   },
 });

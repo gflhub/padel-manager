@@ -8,10 +8,11 @@ import { Avatar, AvatarFallback } from "@/components/ui/avatar"
 import { TonalBadge } from "@/components/ui/tonal-badge"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
-import { addComandaItem, closeComanda, getComandaWithItems } from "@/app/actions/comandas"
+import { addComandaItem, closeComanda, getComandaWithItems, associateCustomerToComanda } from "@/app/actions/comandas"
 import { updateComandaItemQuantity, cancelComanda } from "@/app/actions/comandas"
+import { CustomerCombobox } from "@/components/customer-combobox"
 import { toast } from "sonner"
-import { Plus, CreditCard, Search, Trash2, Clock } from "lucide-react"
+import { Plus, CreditCard, Search, Trash2, Clock, UserPlus } from "lucide-react"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { getInitials, formatElapsedTime } from "@/lib/format-helpers"
@@ -38,6 +39,7 @@ export interface Comanda {
     items_count: number
     total_amount: number
     opened_at: string
+    customerProfileId: string | null
     items?: ComandaItem[]
 }
 
@@ -79,6 +81,8 @@ export function ComandaCard({ comanda, products, onUpdate, isReadOnly = false }:
     const [openAddProduct, setOpenAddProduct] = useState(false)
     const [openClose, setOpenClose] = useState(false)
     const [openCancel, setOpenCancel] = useState(false)
+    const [openAssociate, setOpenAssociate] = useState(false)
+    const [associateId, setAssociateId] = useState<string | null>(null)
     const [selectedPayment, setSelectedPayment] = useState('pix')
     const [searchTerm, setSearchTerm] = useState('')
     const [loading, setLoading] = useState(false)
@@ -346,6 +350,18 @@ export function ComandaCard({ comanda, products, onUpdate, isReadOnly = false }:
                         <CreditCard className="h-4 w-4 mr-2" />
                         Fechar Comanda
                     </Button>
+                    {comanda.customerProfileId === null && (
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-10 w-10 text-muted-foreground"
+                            title="Associar cliente"
+                            onClick={() => setOpenAssociate(true)}
+                            disabled={isReadOnly}
+                        >
+                            <UserPlus className="h-4 w-4" />
+                        </Button>
+                    )}
                     <Button
                         variant="ghost"
                         size="icon"
@@ -476,6 +492,43 @@ export function ComandaCard({ comanda, products, onUpdate, isReadOnly = false }:
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            {/* Dialog de associar cliente */}
+            <Dialog open={openAssociate} onOpenChange={setOpenAssociate}>
+                <DialogContent className="max-w-sm">
+                    <DialogHeader>
+                        <DialogTitle>Associar Cliente</DialogTitle>
+                    </DialogHeader>
+                    <div className="space-y-4">
+                        <CustomerCombobox
+                            value={associateId}
+                            onChange={(id) => setAssociateId(id)}
+                        />
+                        <DialogFooter>
+                            <Button variant="outline" onClick={() => setOpenAssociate(false)}>
+                                Cancelar
+                            </Button>
+                            <Button
+                                disabled={!associateId || loading}
+                                onClick={async () => {
+                                    setLoading(true)
+                                    const result = await associateCustomerToComanda(comanda.id, associateId!)
+                                    if (result.error) {
+                                        toast.error(result.error)
+                                    } else {
+                                        toast.success('Cliente associado!')
+                                        setOpenAssociate(false)
+                                        onUpdate()
+                                    }
+                                    setLoading(false)
+                                }}
+                            >
+                                Confirmar
+                            </Button>
+                        </DialogFooter>
+                    </div>
+                </DialogContent>
+            </Dialog>
         </>
     )
 }

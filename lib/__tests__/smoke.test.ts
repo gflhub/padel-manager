@@ -96,7 +96,7 @@ describe('MVP smoke flow', () => {
     const item = await comandaRepo.addComandaItem(comandaId, 'Água', 2, 5)
     expect(item.error).toBeNull()
 
-    const closed = await comandaRepo.closeComanda(comandaId, clubId, 'pix', userId)
+    const closed = await comandaRepo.closeComanda(comandaId, clubId, userId, 'pix')
     expect(closed.error).toBeNull()
 
     const comanda = await prisma.comanda.findUnique({ where: { id: comandaId }, include: { payments: true } })

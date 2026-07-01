@@ -39,11 +39,14 @@ export async function createComanda(formData: FormData) {
         const customerPhone = formData.get('customer_phone') as string | null
         const notes = customerPhone ? `Tel: ${customerPhone}` : undefined
 
+        const customerProfileId = (formData.get('customer_profile_id') as string) || null
+
         const result = await comandaRepo.createComanda(
             context.clubId,
             customer_name,
             user.id,
-            notes
+            notes,
+            customerProfileId
         )
 
         if (result.error) return { error: result.error }
@@ -84,21 +87,17 @@ export async function addComandaItem(comandaId: string, formData: FormData) {
     }
 }
 
-export async function closeComanda(id: string, paymentMethod: string) {
+export async function closeComanda(id: string, paymentMethod?: string) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
         await assertClubWritable(context.clubId)
 
-        if (!paymentMethod || paymentMethod.trim() === '') {
-            return { error: 'Método de pagamento é obrigatório' }
-        }
-
         const result = await comandaRepo.closeComanda(
             id,
             context.clubId,
-            paymentMethod,
-            context.userId
+            context.userId,
+            paymentMethod
         )
 
         if (result.error) return { error: result.error }
@@ -110,23 +109,21 @@ export async function closeComanda(id: string, paymentMethod: string) {
     }
 }
 
-export async function closeMultipleComandas(ids: string[], paymentMethod: string) {
+export async function closeMultipleComandas(items: { id: string; paymentMethod?: string }[]) {
     try {
         const user = await requireUser()
         const context = await requireClubContext(user.id)
         await assertClubWritable(context.clubId)
 
-        if (!ids || ids.length === 0) return { error: 'Nenhuma comanda selecionada' }
+        if (!items || items.length === 0) return { error: 'Nenhuma comanda selecionada' }
 
-        if (!paymentMethod || paymentMethod.trim() === '') {
-            return { error: 'Método de pagamento é obrigatório' }
-        }
+        const result = await comandaRepo.closeDayComandas(
+            context.clubId,
+            context.userId,
+            items.map(i => ({ comandaId: i.id, paymentMethod: i.paymentMethod }))
+        )
 
-        for (const id of ids) {
-            const result = await comandaRepo.closeComanda(id, context.clubId, paymentMethod, context.userId)
-            if (result.error) return { error: result.error }
-        }
-
+        if (result.error) return { error: result.error }
         revalidatePath('/admin/comandas')
         return { error: null }
     } catch (error) {
@@ -148,6 +145,32 @@ export async function updateComandaItemQuantity(itemId: string, newQuantity: num
         return { error: null }
     } catch (error) {
         const message = error instanceof Error ? error.message : 'Erro ao atualizar quantidade'
+        return { error: message }
+    }
+}
+
+export async function searchClubCustomers(query: string) {
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        return comandaRepo.searchClubCustomers(context.clubId, query)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao buscar clientes'
+        return { error: message, data: null }
+    }
+}
+
+export async function associateCustomerToComanda(comandaId: string, customerProfileId: string) {
+    try {
+        const user = await requireUser()
+        const context = await requireClubContext(user.id)
+        await assertClubWritable(context.clubId)
+        const result = await comandaRepo.associateCustomerToComanda(comandaId, customerProfileId, context.clubId)
+        if (result.error) return { error: result.error }
+        revalidatePath('/admin/comandas')
+        return { error: null }
+    } catch (error) {
+        const message = error instanceof Error ? error.message : 'Erro ao vincular cliente'
         return { error: message }
     }
 }

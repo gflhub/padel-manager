@@ -11,13 +11,14 @@
     "test:ui": "vitest --ui",
     "test:coverage": "vitest --coverage",
     "db:seed": "tsx prisma/seed.ts",
-    "dev:test": "cross-env-shell E2E_TEST_MODE=1 next dev -p ${E2E_PORT:-3100}",
-    "db:reset:e2e": "cross-env SKIP_PRISMA_SEED=1 npx prisma migrate reset --force",
-    "db:seed:e2e": "tsx prisma/seed-e2e.ts",
+    "dev:test": "dotenv -e .env.e2e -- cross-env-shell E2E_TEST_MODE=1 next dev -p ${E2E_PORT:-3100}",
+    "db:reset:e2e": "dotenv -e .env.e2e -- cross-env SKIP_PRISMA_SEED=1 npx prisma migrate reset --force",
+    "db:seed:e2e": "dotenv -e .env.e2e -- tsx prisma/seed-e2e.ts",
     "e2e": "playwright test",
     "e2e:ui": "playwright test --ui",
     "e2e:headed": "playwright test --headed",
-    "e2e:report": "playwright show-report"
+    "e2e:report": "playwright show-report",
+    "test:all": "npm run test && npm run e2e"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
