@@ -69,3 +69,5 @@ GEMINI.md
 # AI-generated specs (conteúdo útil migrado para docs/)
 /PROJECT_SPEC.md
 /REUSABLE_ASSETS.md
+
+docker-*
